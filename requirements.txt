@@ -1,0 +1,8 @@
+SQLAlchemy>=2.0
+pymysql>=1.1
+pandas>=2.0
+python-dotenv>=1.0
+networkx>=3.2
+matplotlib>=3.8
+pyvis>=0.3.2
+Jinja2>=3.1

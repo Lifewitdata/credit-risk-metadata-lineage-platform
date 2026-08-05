@@ -1,0 +1,10 @@
+field_name,description,data_type,source_system,valid_range,last_updated,known_issues
+loan_id,Unique identifier for the loan facility,string,Salesforce,N/A,2024-01-15,None
+industry_sector,UK SIC sector of the SME,string,Companies House,"Retail, Construction, Hospitality, Manufacturing, Healthcare",2024-01-15,None
+years_in_business,Years since company incorporation,integer,Companies House,1 - 50,2024-01-15,Outliers >50 capped at 50
+annual_revenue_gbp,Latest reported annual turnover in GBP,integer,Xero/Quickbooks/Bureau,0 - 10000000,2024-04-02,ALERT: April '24 showing 0 instead of NULL for missing data
+commercial_credit_score,"Bureau risk score (0-100, higher is better)",integer,Experian Commercial,0 - 100,2024-04-02,ALERT: April '24 scores shifted drastically. Mapping under review
+loan_amount_gbp,Principal amount originated,integer,Internal Core Banking,5000 - 500000,2024-01-15,None
+interest_rate,Annual interest rate assigned at origination,float,Internal Pricing Engine,0.05 - 0.20,2024-01-15,None
+dti_ratio,Debt-to-Income ratio at origination,float,Internal Calculated,0.0 - 1.0,2024-01-15,None
+payment_status,Current arrears status of the loan,string,Internal Core Banking,"Current, Late_30, Late_60, Default",2024-01-15,None
