@@ -25,6 +25,8 @@ from etl import load_raw
 from sql.validation import run_validation
 from lineage import load_transformation_rules, build_graph, visualize
 from docs import generate_docs
+from metadata import governance, calculation_validation
+from metadata.dictionary_service import apply_demo_revision
 
 
 def step(name: str):
@@ -77,10 +79,15 @@ def main():
     try:
         run_etl()
         engine = get_engine()
+        apply_demo_revision(engine)
+        governance.seed_records(engine)
         run_validation_step()
+        governance.sync_schema_issues(engine)
+        calculation_validation.run()
         run_lineage_load(engine)
         run_docs(engine)
         run_visualization(engine)
+        governance.export_records(engine)
     except Exception as exc:
         print(f"\nPIPELINE FAILED: {exc}", file=sys.stderr)
         sys.exit(1)

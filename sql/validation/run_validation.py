@@ -98,7 +98,7 @@ def print_report(reconciliation: pd.DataFrame, scorecard: pd.DataFrame) -> None:
 
     for _, ds in scorecard.iterrows():
         print(f"\nDataset: {ds['dataset_name']}")
-        print(f"  Documentation coverage : {ds['documentation_coverage_pct']}%"
+        print(f"  Documented/type-aligned : {ds['documentation_coverage_pct']}%"
               f"  ({int(ds['documented_count'])}/{int(ds['total_fields'])} fields)")
         print(f"  Undocumented           : {int(ds['undocumented_count'])}")
         print(f"  Deprecated              : {int(ds['deprecated_count'])}")

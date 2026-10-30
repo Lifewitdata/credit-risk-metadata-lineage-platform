@@ -13,7 +13,7 @@
 | Undocumented | {{ scorecard.undocumented_count }} |
 | Deprecated | {{ scorecard.deprecated_count }} |
 | Type mismatches | {{ scorecard.type_mismatch_count }} |
-| **Documentation coverage** | **{{ scorecard.documentation_coverage_pct }}%** |
+| **Documented and type-aligned coverage** | **{{ scorecard.documentation_coverage_pct }}%** |
 
 {% if issues %}
 ## ⚠ Open Governance Findings
@@ -33,6 +33,9 @@
 | | |
 |---|---|
 | **Status** | {{ field.governance_status }} |
+| **Verification** | {{ field.status }} |
+| **Evidence** | {{ field.evidence_ref or "Unconfirmed" }} |
+| **Reviewed by / date** | {{ field.verified_by or "—" }} / {{ field.verified_at or "—" }} |
 | **Data type** | {{ field.data_type or '—' }} |
 | **Valid range** | {{ field.valid_range or '—' }} |
 | **Business owner** | {{ field.business_owner or '—' }} |

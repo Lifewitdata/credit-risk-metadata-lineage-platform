@@ -21,6 +21,7 @@ Design notes:
 """
 
 import sys
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -225,17 +226,18 @@ def snapshot_physical_schema(engine: Engine, dataset_id: int) -> None:
             {"schema": db_name, "table": PHYSICAL_TABLE_NAME},
         ).fetchall()
 
+        scan_id = str(uuid.uuid4())
         for col_name, data_type, position in columns:
             conn.execute(
                 text(
                     """
                     INSERT INTO physical_schema_snapshot
-                        (dataset_id, column_name, physical_data_type, ordinal_position)
+                        (dataset_id, column_name, physical_data_type, ordinal_position, scan_id)
                     VALUES
-                        (:dataset_id, :col, :dtype, :pos)
+                        (:dataset_id, :col, :dtype, :pos, :scan_id)
                     """
                 ),
-                {"dataset_id": dataset_id, "col": col_name, "dtype": data_type, "pos": position},
+                {"dataset_id": dataset_id, "col": col_name, "dtype": data_type, "pos": position, "scan_id": scan_id},
             )
         print(f"[physical_schema_snapshot] recorded {len(columns)} columns "
               f"for {PHYSICAL_TABLE_NAME}")

@@ -86,9 +86,12 @@ def _fetch_dictionary_context(engine: Engine, dataset_name: str) -> dict:
 
     reconciliation_by_field = {row["field_name"]: row["governance_status"] for row in reconciliation}
 
+    with engine.connect() as conn:
+        verification = {r['field_name']:dict(r) for r in conn.execute(text('SELECT * FROM field_verification WHERE dataset_id=:ds'),{'ds':dataset_id}).mappings()}
     fields = []
     for f in current_fields:
         field_dict = dict(f)
+        field_dict.update(verification.get(f["field_name"], {"status":"draft"}))
         field_dict["governance_status"] = reconciliation_by_field.get(f["field_name"], "UNKNOWN")
         field_dict["history"] = history_by_field.get(f["field_name"], [])
         fields.append(field_dict)
@@ -131,8 +134,9 @@ def _fetch_lineage_context(engine: Engine, dataset_name: str) -> dict:
             text(
                 """
                 SELECT rule_name, transformation_type, target_field,
-                       transformation_logic, created_by
+                       transformation_logic, created_by, verification_status, evidence_ref
                 FROM transformation_rules
+                WHERE is_active=1
                 ORDER BY target_field, rule_name
                 """
             )

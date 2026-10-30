@@ -55,3 +55,13 @@ definition or values changed. Use this before approving any change to a source f
 {% for rule in all_rules -%}
 | `{{ rule.rule_name }}` | {{ rule.transformation_type }} | `{{ rule.target_field }}` | {{ rule.transformation_logic }} | {{ rule.created_by }} |
 {% endfor %}
+
+## Verification
+
+External mappings are illustrative until their source specifications are reviewed.
+
+| Rule | Verification | Evidence |
+|---|---|---|
+{% for rule in all_rules %}
+| {{ rule.rule_name }} | {{ rule.verification_status }} | {{ rule.evidence_ref or "Unconfirmed" }} |
+{% endfor %}

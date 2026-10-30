@@ -1,0 +1,38 @@
+name: Catalog regression and MySQL integration
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-password
+          MYSQL_DATABASE: credit_metadata_platform
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pci-only-password"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    env:
+      METADATA_DATABASE_URL: mysql+pymysql://root:ci-only-password@127.0.0.1:3306/credit_metadata_platform
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt cryptography
+      - run: python -m pytest -q tests/test_catalog.py
+      - run: CATALOG_TEST_MYSQL=1 python -m pytest -q tests/test_mysql.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: catalog-validation-evidence
+          path: |
+            docs/data_dictionary.md
+            docs/lineage_report.md
+            docs/lineage_graph.png
+            docs/lineage_graph_interactive.html
+            reports/
