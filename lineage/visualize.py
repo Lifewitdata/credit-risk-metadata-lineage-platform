@@ -127,6 +127,10 @@ def plot_interactive(graph: nx.DiGraph, output_path: Path) -> Path:
 
     net.show_buttons(filter_=["physics"])
     net.write_html(str(output_path), open_browser=False, notebook=False)
+    # pyvis writes with the platform newline, so on Windows the committed HTML
+    # would differ from the file only by line endings. Generated reports are
+    # compared byte-for-byte against the repository, so pin them to LF here.
+    output_path.write_bytes(output_path.read_bytes().replace(b"\r\n", b"\n"))
 
     print(f"[visualize] wrote interactive HTML: {output_path}")
     return output_path
