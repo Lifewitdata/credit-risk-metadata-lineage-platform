@@ -260,10 +260,17 @@ def test_confirmation_requires_evidence(db):
 
 def test_import_entrypoint_and_configuration(monkeypatch):
     import main
-    from config.db_config import get_engine
+    import config.db_config as db_config
+    # A developer checkout normally has a real config/.env, which by design fills
+    # in the variable when the environment does not set it. Silence that layer so
+    # this checks the guard itself rather than the machine running the test.
     monkeypatch.delenv('METADATA_DATABASE_URL', raising=False)
+    monkeypatch.setattr(db_config, 'load_dotenv', lambda *args, **kwargs: False)
     with pytest.raises(RuntimeError, match='METADATA_DATABASE_URL'):
-        get_engine()
+        db_config.get_engine()
+    monkeypatch.setenv('METADATA_DATABASE_URL', 'sqlite:///catalog.db')
+    with pytest.raises(ValueError, match='mysql'):
+        db_config.get_engine()
 
 
 def test_sql_script_parser_handles_triggers():
