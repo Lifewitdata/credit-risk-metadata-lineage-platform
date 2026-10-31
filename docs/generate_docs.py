@@ -115,7 +115,10 @@ def generate_data_dictionary_doc(engine: Engine) -> Path:
     rendered = template.render(**context)
 
     output_path = DOCS_DIR / "data_dictionary.md"
-    output_path.write_text(rendered)
+    # Templates emit non-ASCII glyphs. On Windows the default cp1252 encode fails
+    # and newline translation would write CRLF, so committed docs could never
+    # match a regenerated run.
+    output_path.write_text(rendered, encoding="utf-8", newline="\n")
     print(f"[docs] wrote {output_path}")
     return output_path
 
@@ -142,6 +145,29 @@ def _fetch_lineage_context(engine: Engine, dataset_name: str) -> dict:
             )
         ).mappings().fetchall()
 
+        # One row per input relationship: the specific source field behind each
+        # edge, how it is transformed, and what evidence (if any) verifies it.
+        relationships = conn.execute(
+            text(
+                """
+                SELECT tr.rule_name, tr.target_field, sn.field_name AS source_field,
+                       sd.dataset_name AS source_dataset, sn.node_type,
+                       e.source_mapping_label, e.source_transformation,
+                       e.source_verification_status, e.source_evidence_ref, e.source_verified_at
+                FROM lineage_edges e
+                JOIN lineage_nodes sn ON sn.node_id = e.source_node_id
+                JOIN lineage_nodes tn ON tn.node_id = e.target_node_id
+                JOIN datasets sd ON sd.dataset_id = sn.dataset_id
+                JOIN transformation_rules tr ON tr.rule_id = e.rule_id
+                WHERE e.is_active = 1 AND tr.is_active = 1
+                ORDER BY sn.node_type DESC, sd.dataset_name, sn.field_name, tr.rule_name
+                """
+            )
+        ).mappings().fetchall()
+
+    external_mappings = [dict(r) for r in relationships if r["node_type"] == "External Feed"]
+    internal_mappings = [dict(r) for r in relationships if r["node_type"] != "External Feed"]
+
     rules_by_target: dict[str, list[dict]] = {}
     for r in all_rules:
         rules_by_target.setdefault(r["target_field"], []).append(dict(r))
@@ -160,7 +186,13 @@ def _fetch_lineage_context(engine: Engine, dataset_name: str) -> dict:
             # Depth = shortest directed hop count from the ancestor to this
             # field, used purely to indent the ASCII tree for readability.
             depth = nx.shortest_path_length(graph, a, key) - 1
-            upstream.append({**graph.nodes[a], "depth": depth})
+            node = graph.nodes[a]
+            # An external feed's field name alone ("Id", "risk_score") is
+            # ambiguous, so the trace shows which feed it belongs to.
+            label = node["field_name"]
+            if node["node_type"] == "External Feed":
+                label = f'{label} <- {node["dataset_name"]}'
+            upstream.append({**node, "depth": depth, "trace_label": label})
         upstream.sort(key=lambda n: (n["depth"], n["field_name"]))
 
         derived_field_contexts.append(
@@ -193,6 +225,8 @@ def _fetch_lineage_context(engine: Engine, dataset_name: str) -> dict:
         "derived_fields": derived_field_contexts,
         "source_impact": source_impact,
         "all_rules": [dict(r) for r in all_rules],
+        "external_mappings": external_mappings,
+        "internal_mappings": internal_mappings,
     }
 
 
@@ -204,7 +238,7 @@ def generate_lineage_doc(engine: Engine) -> Path:
     rendered = template.render(**context)
 
     output_path = DOCS_DIR / "lineage_report.md"
-    output_path.write_text(rendered)
+    output_path.write_text(rendered, encoding="utf-8", newline="\n")
     print(f"[docs] wrote {output_path}")
     return output_path
 

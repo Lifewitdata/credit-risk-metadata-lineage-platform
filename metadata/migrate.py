@@ -14,7 +14,14 @@ ADDITIONS = {
         'evidence_ref': 'TEXT', 'verified_at': 'DATE', 'verified_by': 'VARCHAR(150)',
     },
     'lineage_nodes': {'is_active': 'TINYINT NOT NULL DEFAULT 1'},
-    'lineage_edges': {'is_active': 'TINYINT NOT NULL DEFAULT 1'},
+    'lineage_edges': {
+        'is_active': 'TINYINT NOT NULL DEFAULT 1',
+        'source_mapping_label': "VARCHAR(16) NOT NULL DEFAULT 'illustrative'",
+        'source_transformation': 'TEXT',
+        'source_verification_status': "VARCHAR(16) NOT NULL DEFAULT 'draft'",
+        'source_evidence_ref': 'TEXT',
+        'source_verified_at': 'DATE',
+    },
     'physical_schema_snapshot': {'scan_id': 'VARCHAR(36)'},
 }
 TABLES = [
