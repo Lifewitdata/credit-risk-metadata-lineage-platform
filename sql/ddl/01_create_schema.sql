@@ -48,6 +48,12 @@ CREATE TABLE datasets (
 --    The *business-approved* definition of each field, versioned over time.
 --    Never UPDATE a row's definition in place -> close it and insert a new one.
 --    This preserves "what did we say this field meant on date X" for audit.
+--
+--    current_guard is what makes "exactly one current version per field" a
+--    database rule rather than an application promise: it is 1 only while a row
+--    is current and NULL otherwise, and NULLs never collide in a unique index,
+--    so closed history is unconstrained while a second current row is rejected
+--    even by two writers that both passed the read-then-write check.
 -- ----------------------------------------------------------------------------
 CREATE TABLE data_dictionary (
     dictionary_id        INT AUTO_INCREMENT PRIMARY KEY,
@@ -61,10 +67,12 @@ CREATE TABLE data_dictionary (
     valid_from                         DATE NOT NULL,
     valid_to                            DATE DEFAULT NULL COMMENT 'NULL = still active',
     is_current                           TINYINT(1) NOT NULL DEFAULT 1,
+    current_guard                        TINYINT GENERATED ALWAYS AS (CASE WHEN is_current = 1 THEN 1 ELSE NULL END) STORED,
     created_at                            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_dict_dataset
         FOREIGN KEY (dataset_id) REFERENCES datasets(dataset_id),
-    INDEX idx_field_current (dataset_id, field_name, is_current)
+    INDEX idx_field_current (dataset_id, field_name, is_current),
+    UNIQUE KEY uq_dictionary_current (dataset_id, field_name, current_guard)
 ) ENGINE=InnoDB;
 
 -- ----------------------------------------------------------------------------
