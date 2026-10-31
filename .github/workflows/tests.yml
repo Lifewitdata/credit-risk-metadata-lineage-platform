@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-dev.txt cryptography
+      - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q tests/test_catalog.py
       - run: CATALOG_TEST_MYSQL=1 python -m pytest -q tests/test_mysql.py
       - uses: actions/upload-artifact@v4
