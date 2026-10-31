@@ -69,7 +69,8 @@ def set_verification(engine, dataset_id, field, status, evidence='', reviewer=''
 def export_records(engine):
     target=ROOT/'reports/local';target.mkdir(parents=True,exist_ok=True)
     for table in ['field_verification','governance_issues','vendor_usage','lineage_change_log']:
-        pd.read_sql(text(f'SELECT * FROM {table}'),engine).to_csv(target/f'{table}.csv',index=False)
+        pd.read_sql(text(f'SELECT * FROM {table}'),engine).to_csv(
+            target/f'{table}.csv',index=False,encoding='utf-8',lineterminator='\n')
 
 def transition_issue(engine, key, status, evidence=''):
     if status not in {'open','in_progress','resolved'}:raise ValueError('Invalid issue status')

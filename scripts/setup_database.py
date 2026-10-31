@@ -27,13 +27,13 @@ def setup(engine,upgrade=False):
         exists='data_dictionary' in inspect(conn).get_table_names()
         if exists and not upgrade:raise ValueError('Schema already exists. Back it up and use --upgrade.')
         if not exists:
-            for stmt in statements((ROOT/'sql/ddl/01_create_schema.sql').read_text()):
+            for stmt in statements((ROOT/'sql/ddl/01_create_schema.sql').read_text(encoding='utf-8')):
                 if not stmt.lstrip().upper().startswith(('CREATE DATABASE','USE ')):
                     conn.exec_driver_sql(stmt)
     migrate(engine)
     with engine.begin() as conn:
         for filename in ['sql/validation/02_dictionary_reconciliation.sql','sql/ddl/03_audit_triggers.sql']:
-            for stmt in statements((ROOT/filename).read_text()):
+            for stmt in statements((ROOT/filename).read_text(encoding='utf-8')):
                 if not stmt.lstrip().upper().startswith(('USE ','REVOKE ')):
                     conn.exec_driver_sql(stmt)
 

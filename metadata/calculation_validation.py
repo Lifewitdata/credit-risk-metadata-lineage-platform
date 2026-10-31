@@ -16,7 +16,7 @@ def validate_ratio(frame,tolerance=1e-6):
 def run():
     result=validate_ratio(pd.read_csv(ROOT/'data/raw/credit_datamart_sme_loans.csv'))
     target=ROOT/'reports';target.mkdir(exist_ok=True)
-    result.to_csv(target/'calculation_validation.csv',index=False)
+    result.to_csv(target/'calculation_validation.csv',index=False,encoding='utf-8',lineterminator='\n')
     return result
 
 if __name__=='__main__':
