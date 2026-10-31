@@ -48,6 +48,7 @@ def build_graph(engine: Engine) -> nx.DiGraph:
                 FROM lineage_nodes n
                 JOIN datasets d ON d.dataset_id = n.dataset_id
                 WHERE n.is_active=1
+                ORDER BY d.dataset_name, n.field_name
                 """
             )
         ).mappings().fetchall()
@@ -59,6 +60,7 @@ def build_graph(engine: Engine) -> nx.DiGraph:
                 FROM lineage_edges e
                 JOIN transformation_rules tr ON tr.rule_id = e.rule_id
                 WHERE e.is_active=1 AND tr.is_active=1
+                ORDER BY tr.rule_name, e.source_node_id, e.target_node_id
                 """
             )
         ).mappings().fetchall()
