@@ -21,7 +21,7 @@ PHYSICAL_COLUMNS = ['loan_id', 'borrower_id', 'snapshot_date', 'industry_sector'
 
 DDL = [
     "CREATE TABLE datasets(dataset_id INTEGER PRIMARY KEY,dataset_name TEXT UNIQUE,"
-    "physical_table_name TEXT,description TEXT,business_owner TEXT)",
+    "physical_table_name TEXT,description TEXT,business_owner TEXT,refresh_frequency TEXT)",
     "CREATE TABLE transformation_rules(rule_id INTEGER PRIMARY KEY,rule_name TEXT UNIQUE,"
     "target_dataset_id INTEGER,target_field TEXT,transformation_type TEXT,transformation_logic TEXT,"
     "business_justification TEXT,created_by TEXT,is_active INTEGER,verification_status TEXT,"
@@ -58,7 +58,9 @@ def db():
     with engine.begin() as c:
         for ddl in DDL:
             c.exec_driver_sql(ddl)
-        c.exec_driver_sql("INSERT INTO datasets(dataset_id,dataset_name) VALUES (1,'credit_datamart_sme_loans')")
+        c.exec_driver_sql(
+            "INSERT INTO datasets(dataset_id,dataset_name,physical_table_name,refresh_frequency)"
+            " VALUES (1,'credit_datamart_sme_loans','raw_credit_datamart_sme_loans','Monthly')")
         for position, column in enumerate(PHYSICAL_COLUMNS, start=1):
             c.exec_driver_sql(
                 "INSERT INTO physical_schema_snapshot(dataset_id,column_name,physical_data_type,"

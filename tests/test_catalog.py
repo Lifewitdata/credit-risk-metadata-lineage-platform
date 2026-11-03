@@ -8,6 +8,7 @@ from lineage.build_graph import build_graph, upstream_lineage
 from metadata.dictionary_service import update_field_definition, FieldDefinition, get_definition_as_of
 from metadata.calculation_validation import validate_ratio
 from metadata.governance import set_verification
+from metadata.data_quality import COLUMNS, evaluate, _quote
 
 GOVERNED = 'credit_datamart_sme_loans'
 
@@ -251,6 +252,64 @@ def test_ratio_checks_preserve_input_and_block_bad_denominators():
     out = validate_ratio(f)
     assert out.status.tolist() == ['pass', 'mismatch', 'blocked_input', 'blocked_input']
     pd.testing.assert_frame_equal(f, before)
+
+
+def load_physical(db, rows):
+    """Create the scanned table, taking its columns from the scan the catalog holds."""
+    with db.begin() as c:
+        columns = [row[0] for row in c.exec_driver_sql(
+            "SELECT column_name FROM vw_latest_schema_snapshot WHERE dataset_id=1"
+            " ORDER BY ordinal_position")]
+        c.exec_driver_sql('CREATE TABLE raw_credit_datamart_sme_loans ('
+                          + ', '.join(f'{column} TEXT' for column in columns) + ')')
+        for row in rows:
+            c.exec_driver_sql(
+                'INSERT INTO raw_credit_datamart_sme_loans VALUES ('
+                + ', '.join('NULL' if value is None else f"'{value}'" for value in row) + ')')
+        c.exec_driver_sql("""INSERT INTO data_dictionary(dataset_id,field_name,data_type,is_current)
+                             VALUES (1,'snapshot_date','date',1)""")
+
+
+def test_data_quality_counts_nulls_and_measures_freshness(db):
+    load_physical(db, [('L1', 'B1', '2024-01-31', 'Retail', None, 100, 620, 20, 0.08, 0.2, 'Current'),
+                       ('L2', 'B2', '2024-02-29', None, 3, 100, 610, 20, 0.09, 0.2, 'Current')])
+    with db.connect() as c:
+        frame = pd.DataFrame(evaluate(c, date(2024, 3, 1)), columns=COLUMNS)
+    status = dict(zip(frame.subject, frame.status))
+    assert status['industry_sector'] == 'review'      # missing on one loan
+    assert status['loan_id'] == 'ok'                  # no nulls anywhere
+    nulls = frame[(frame.check == 'null_count') & (frame.subject == 'industry_sector')]
+    assert nulls.value.item() == 1
+    assert frame[frame.check == 'freshness'].status.item() == 'current'
+    assert frame[frame.check == 'freshness'].value.item() == '2024-02-29'
+    # 2024-02-29 is 92 days before this run date, past the monthly tolerance.
+    with db.connect() as c:
+        stale = evaluate(c, date(2024, 6, 1))
+    assert [r['status'] for r in stale if r['check'] == 'freshness'] == ['stale']
+
+
+def test_freshness_refuses_to_guess_an_undeclared_cadence(db):
+    load_physical(db, [('L1', 'B1', '2024-01-31', 'Retail', 1, 100, 620, 20, 0.08, 0.2, 'Current')])
+    with db.begin() as c:
+        c.exec_driver_sql("UPDATE datasets SET refresh_frequency='Whenever' WHERE dataset_id=1")
+    with db.connect() as c:
+        freshness = [r for r in evaluate(c, date(2024, 3, 1)) if r['check'] == 'freshness']
+    assert freshness[0]['status'] == 'unknown'
+    assert freshness[0]['expected'] == 'cadence Whenever'
+
+
+def test_a_snapshot_dated_after_the_run_is_reviewed_not_current(db):
+    load_physical(db, [('L1', 'B1', '2024-01-31', 'Retail', 1, 100, 620, 20, 0.08, 0.2, 'Current')])
+    with db.connect() as c:
+        freshness = [r for r in evaluate(c, date(2024, 1, 1)) if r['check'] == 'freshness']
+    assert freshness[0]['status'] == 'review'
+    assert freshness[0]['expected'] == 'not dated after the run'
+
+
+def test_a_schema_scan_name_that_is_not_an_identifier_is_refused():
+    for hostile in ['loans; DROP TABLE datasets', 'a`b', '1lead', '']:
+        with pytest.raises(ValueError, match='Unusable identifier'):
+            _quote(hostile)
 
 
 def test_confirmation_requires_evidence(db):

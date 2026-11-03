@@ -1,5 +1,15 @@
 # Credit Risk Metadata & Lineage Platform
 
+![Catalog regression and MySQL integration](https://github.com/Lifewitdata/credit-risk-metadata-lineage-platform/actions/workflows/tests.yml/badge.svg?branch=main)
+
+## Start here
+
+This is a catalogue of a small business-loan dataset. It records what each column
+means, where every figure came from, and which answers we still do not have.
+[docs/investigation.md](docs/investigation.md) shows the point: a ratio we publish
+disagrees with its own written formula, and it is left visible for review rather
+than quietly corrected.
+
 A hands-on Python/MySQL portfolio project for catalog maintenance, field lineage,
 calculation reconciliation and governance issue tracking. It answers **where a
 field comes from, whether its definition matches the database, what is verified,
@@ -25,9 +35,12 @@ visualizations and `reports/local/` CSV extracts from MySQL. The generated repor
 are committed, and the MySQL integration test regenerates them and compares the
 result byte-for-byte (apart from the run timestamp in the two markdown headers), so
 a committed report cannot quietly disagree with the code that produced it. The
-rendered graph is compared too, which is only possible because layout ordering is
-now fixed rather than taken from set iteration. The CI artifact
-`catalog-validation-evidence` contains outputs from a disposable MySQL run.
+interactive HTML graph is compared the same way and embeds every node and edge, so a
+lineage change still fails the suite. The PNG is instead rendered twice within one run
+and required to agree with itself: raster output only ever matches the machine that
+drew it, and asserting otherwise made the suite pass on one laptop and fail on Linux.
+The CI artifact `catalog-validation-evidence` contains outputs from a disposable MySQL
+run, including `reports/local/data_quality.csv`.
 
 ## Implemented controls
 
@@ -43,7 +56,8 @@ now fixed rather than taken from set iteration. The CI artifact
 | Issue queue | Ownership, next action, status and closure evidence; schema findings reopen if they recur; an open issue blocks confirming a rule on that field |
 | Vendor records | Dataset scope, use restrictions, customer display, redistribution, review/renewal dates and open questions |
 | Calculation QA | Independent loan/revenue reconciliation; missing/zero denominators remain blocked |
-| Tests | 21 SQLite regression tests plus a disposable MySQL integration suite covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
+| Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed |
+| Tests | 25 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
 
 Schema conformity and verification are separate: a correctly typed field can
 still have an unconfirmed business definition. The scorecard's coverage metric
