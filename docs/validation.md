@@ -38,6 +38,19 @@ The reconciliation ran against the committed ten-row fixture: seven mismatches, 
 blocked inputs, zero passes. This is a finding to investigate, not a failed attempt to
 make the data look clean.
 
+## Data quality on the same fixture
+
+`metadata/data_quality.py` reports one null on the shipped ten rows
+(`annual_revenue_gbp` on `L-1003`, one of the three records whose ratio is blocked)
+and nothing else missing, so 10 of the 11 scanned columns come back `ok`. The other
+two blocked records hold a literal `0.0`, which a null count does not flag: that is
+the reconciliation's job, and the two checks are deliberately separate. Its freshness check
+compares the latest `snapshot_date`, 2024-04-01, with the run date: the dataset
+declares a `Monthly` cadence with a 33-day tolerance, so any run in 2026 reports
+that column `stale`. That is the intended reading of a 2024 snapshot, and one
+reason the output is written to gitignored `reports/local/` instead of being a
+committed file the suite compares byte-for-byte.
+
 ## GitHub Actions results
 
 All runs are Ubuntu, Python 3.12, against a `mysql:8.0` service container.
@@ -48,6 +61,23 @@ All runs are Ubuntu, Python 3.12, against a `mysql:8.0` service container.
 | 2026-11-03 | `488be1e` | 41594927365 (push), 41594932903 (PR) | 21 passed in 2.35s | 7 passed in 8.08s |
 | 2026-11-03 | `d28d247` | 41595336044 (push), 41595340827 (PR) | success | success |
 | 2026-11-03 | `e6c0dbd` (merged `main`) | 41595577622 (push) | success | success |
+| 2026-11-03 | `b168cc6` | 41598277880 (push) | not reached | not reached |
+| 2026-11-03 | `a8274fc` | 41598586313 (push) | success in 3s | success in 7s |
+
+`b168cc6` never ran a test. Rewriting `requirements-dev.txt` to add `black` dropped
+the `-r requirements.txt` include, pip reported success having installed only
+pytest, and the job died collecting `conftest.py` with `ModuleNotFoundError: No
+module named 'sqlalchemy'`. A requirements file that pip accepts is not a
+requirements file that pip resolved, so the include line is now covered by the
+install step's own duration: 17s on `a8274fc`, 3s on the broken commit.
+
+`a8274fc` is the head of the branch that adds `metadata/data_quality.py`. Both
+suites exit 0 in CI, and the `engine` fixture runs `main.py`, whose step `3/6`
+is that check, so the null and freshness pass has executed against MySQL 8.0 on
+every push since. The test counts on that commit are 25 collected in
+`tests/test_catalog.py` and 7 in `tests/test_mysql.py`; the job log lines were not
+read, so the CI column records the step result and duration rather than a
+transcribed count.
 
 The 2026-10-31 failure was `test_committed_documentation_matches_the_database`
 comparing the committed `docs/lineage_graph.png` byte-for-byte with the one the
@@ -71,7 +101,10 @@ On 2026-11-03, from merged `main` (`e6c0dbd`) into a clean directory with a new
 - `python -m pip install -r requirements-dev.txt` succeeded; no manual
   `cryptography` install and no system package was needed.
 - `python -m pytest -q`: 21 passed, 7 skipped. The skipped set is
-  `tests/test_mysql.py`, opt-in behind `CATALOG_TEST_MYSQL`.
+  `tests/test_mysql.py`, opt-in behind `CATALOG_TEST_MYSQL`. A clone of the branch
+  that adds the data-quality check collects four more, so the same command reports
+  25 passed and 7 skipped; that count has not been re-run from a hand-followed
+  fresh clone, only from this working tree.
 - `python scripts/setup_database.py` with no configuration exits with the
   instruction to copy `config/.env.example`.
 - The same command with `config/.env.example` copied to `config/.env` reaches a real
