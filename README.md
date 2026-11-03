@@ -65,7 +65,8 @@ run, including `reports/local/data_quality.csv`.
 | Calculation QA | Independent loan/revenue reconciliation; missing/zero denominators remain blocked |
 | Excel deliverable | The reconciliation as a four-tab workbook whose expected ratio, counts and maximum drift are live formulas; compared cell by cell because a zip entry cannot be compared byte for byte |
 | Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed |
-| Tests | 27 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
+| Scale evidence | The data-quality pass measured on 1,000 rows x 100 synthetic fields: one aggregate query per dataset regardless of width. A never-populated column and a late file are reported; the seeded duplicate key is asserted to be a gap, because nothing in this project checks uniqueness. Wall clock is reported, not asserted, and no other loader is scale-tested |
+| Tests | 31 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
 
 Schema conformity and verification are separate: a correctly typed field can
 still have an unconfirmed business definition. The scorecard's coverage metric

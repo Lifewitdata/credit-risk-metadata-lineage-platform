@@ -51,6 +51,40 @@ that column `stale`. That is the intended reading of a 2024 snapshot, and one
 reason the output is written to gitignored `reports/local/` instead of being a
 committed file the suite compares byte-for-byte.
 
+## Scale behaviour on synthetic volume
+
+The ten-row fixture says nothing about volume, so `tests/test_scale.py` builds a
+synthetic catalog in SQLite: two registered datasets, 1,000 rows x 100 fields in the
+wide one, seeded with the defects an extract actually arrives with — a column that
+never populated, a column roughly 5% missing, a duplicate `event_id`, and a partition
+that stopped arriving 40 days ago. The narrow control dataset holds the same declared
+`Daily` cadence and arrived yesterday.
+
+The measured run is `[scale] 1000 rows x 100 fields over 2 datasets in 21 ms` on the
+local Python 3.14.6 machine, averaged over the module's four evaluations. That number
+is printed for the record and is not asserted: a wall-clock threshold would make CI a
+report on runner load. What the test does assert is structural —
+
+- the whole pass issues 9 statements: one registry read, then per dataset a schema-scan
+  read, one aggregate, a dictionary read and a `MAX` for its single documented date
+  field. 100 columns therefore cost 100 `SUM` expressions inside one query, not 100
+  queries;
+- exactly one aggregate statement touches the wide table;
+- the never-populated and sparsely populated columns are the only `review` null
+  findings, the 40-day-old partition is `stale` against `<= 2 days`, and the
+  one-day-old control partition is `current` under the same cadence — so `stale` is
+  the file, not the tolerance table.
+
+Two gaps are asserted as gaps rather than papered over. The duplicate `event_id` is
+visible to a hand-written query but no check in this project looks for duplicates, and
+nothing enforces uniqueness in the DDL. And the ETL, lineage and documentation loaders
+are written for the one governed dataset; they were not run against these synthetic
+tables, so "the pipeline scales" is not a claim this test supports. Only the
+data-quality pass is.
+
+The step runs in CI as its own `python -m pytest -q tests/test_scale.py` line, SQLite
+only, so it costs seconds and does not need the MySQL service.
+
 ## GitHub Actions results
 
 All runs are Ubuntu, Python 3.12, against a `mysql:8.0` service container.
