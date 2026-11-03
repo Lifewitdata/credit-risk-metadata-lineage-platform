@@ -45,7 +45,9 @@ All runs are Ubuntu, Python 3.12, against a `mysql:8.0` service container.
 | Date | Commit | Runs | `test_catalog.py` | `test_mysql.py` |
 |---|---|---|---|---|
 | 2026-10-31 | `9e539a2` | 41177043907 (push), 41177046485 (PR) | 21 passed | 1 failed, 5 passed in 1h 17m 56s |
-| 2026-11-03 | `488be1e` | 41594927365 (push), 41594932903 (PR) | 21 passed | **7 passed in 8.08s** |
+| 2026-11-03 | `488be1e` | 41594927365 (push), 41594932903 (PR) | 21 passed in 2.35s | 7 passed in 8.08s |
+| 2026-11-03 | `d28d247` | 41595336044 (push), 41595340827 (PR) | success | success |
+| 2026-11-03 | `e6c0dbd` (merged `main`) | 41595577622 (push) | success | success |
 
 The 2026-10-31 failure was `test_committed_documentation_matches_the_database`
 comparing the committed `docs/lineage_graph.png` byte-for-byte with the one the
@@ -60,6 +62,29 @@ same run and comparing both with this run's output. Graph structure stays covere
 by `docs/lineage_graph_interactive.html`, which embeds every node and edge and is
 still compared with the committed file. That comparison sat after the PNG in the
 old loop and so never executed on 2026-10-31; it passes on 2026-11-03.
+
+## Fresh clone, as someone who did not write it
+
+On 2026-11-03, from merged `main` (`e6c0dbd`) into a clean directory with a new
+`.venv` on Python 3.14.6:
+
+- `python -m pip install -r requirements-dev.txt` succeeded; no manual
+  `cryptography` install and no system package was needed.
+- `python -m pytest -q`: 21 passed, 7 skipped. The skipped set is
+  `tests/test_mysql.py`, opt-in behind `CATALOG_TEST_MYSQL`.
+- `python scripts/setup_database.py` with no configuration exits with the
+  instruction to copy `config/.env.example`.
+- The same command with `config/.env.example` copied to `config/.env` reaches a real
+  MySQL handshake and returns `OperationalError (1045) Access denied for user
+  'metadata_platform_user'@'localhost'`, which is what a placeholder password should
+  produce.
+
+Not executed: `setup_database.py` against a live server, `main.py`, and
+`CATALOG_TEST_MYSQL=1 pytest`. No MySQL server was reachable from this environment, so
+the documented fresh-install path is proven up to the connection, not end to end.
+Actions covers part of that gap, because the `engine` fixture creates an empty schema,
+runs `setup()` and then `main.py`, but that is a service container rather than the
+README being followed by hand.
 
 ## Not yet claimed
 
