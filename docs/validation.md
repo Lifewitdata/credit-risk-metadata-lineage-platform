@@ -38,34 +38,34 @@ The reconciliation ran against the committed ten-row fixture: seven mismatches, 
 blocked inputs, zero passes. This is a finding to investigate, not a failed attempt to
 make the data look clean.
 
-## GitHub Actions result for the pushed state
+## GitHub Actions results
 
-Actions ran `9e539a2` on 2026-10-31 (both the `push` and `pull_request` events) on
-Ubuntu with Python 3.12 against a `mysql:8.0` service:
+All runs are Ubuntu, Python 3.12, against a `mysql:8.0` service container.
 
-- `tests/test_catalog.py`: 21 passed.
-- `tests/test_mysql.py`: 1 failed, 5 passed in 1h 17m 56s.
+| Date | Commit | Runs | `test_catalog.py` | `test_mysql.py` |
+|---|---|---|---|---|
+| 2026-10-31 | `9e539a2` | 41177043907 (push), 41177046485 (PR) | 21 passed | 1 failed, 5 passed in 1h 17m 56s |
+| 2026-11-03 | `488be1e` | 41594927365 (push), 41594932903 (PR) | 21 passed | **7 passed in 8.08s** |
 
-The failure was `test_committed_documentation_matches_the_database` comparing the
-committed `docs/lineage_graph.png` byte-for-byte with the one the runner
-regenerated. It is not a version difference: pip resolved matplotlib 3.11.2, the
-same version recorded in the committed PNG's `Software` text chunk, and the
-markdown reports and interactive HTML matched exactly. Only the raster differed,
-so the assertion held on the machine that rendered the image and could never hold
-on another platform. The image is now checked for stability by rendering the
-current graph twice in the same run, and graph structure stays covered by the
-interactive HTML, which embeds every node and edge.
+The 2026-10-31 failure was `test_committed_documentation_matches_the_database`
+comparing the committed `docs/lineage_graph.png` byte-for-byte with the one the
+runner regenerated. It was not a version difference: pip resolved matplotlib
+3.11.2, the version recorded in the committed PNG's `Software` text chunk. The
+markdown reports matched; only the raster differed, so the assertion could hold
+only on the Windows machine that rendered the image. Almost all of the 78 minutes
+was pytest building a readable diff of two ~260 KB byte strings, not the pipeline.
+
+Since `488be1e` the image is checked by rendering the current graph twice in the
+same run and comparing both with this run's output. Graph structure stays covered
+by `docs/lineage_graph_interactive.html`, which embeds every node and edge and is
+still compared with the committed file. That comparison sat after the PNG in the
+old loop and so never executed on 2026-10-31; it passes on 2026-11-03.
 
 ## Not yet claimed
 
-The change above has not been executed against MySQL, so CI still has to confirm
-it. The 6-passing-1-failing result came from a Windows runner environment; nothing
-here proves the same on Ubuntu. SQLite regression tests are not proof of MySQL
-behaviour, and the generated reports are portfolio fixtures, not evidence about a
-real vendor feed.
+SQLite regression tests are not proof of MySQL behaviour, and the generated reports
+are portfolio fixtures, not evidence about a real vendor feed.
 
-Two things worth a separate decision. The integration job spends most of its wall
-clock in three full `main.py` subprocess runs. And `generate_docs.py` orders
-relationships by `sn.node_type DESC`, which sorts by ENUM index on MySQL but
-alphabetically on the SQLite fixtures, so the catalog tests exercise a different
-order from production.
+Worth a separate decision: `generate_docs.py` orders relationships by
+`sn.node_type DESC`, which sorts by ENUM index on MySQL but alphabetically on the
+SQLite fixtures, so the catalog tests exercise a different order from production.
