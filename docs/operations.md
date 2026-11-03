@@ -71,9 +71,29 @@ the cadence is unset or outside the Daily/Weekly/Monthly tolerances. `unknown` i
 registry gap to fix, not a result to accept: declare the cadence rather than editing
 the tolerance table to make the row green.
 
+A `Daily` cadence is tolerated at 2 **weekdays**, while Weekly and Monthly are
+tolerated in calendar days. A file that only publishes on trading days is not four
+days late on the Tuesday after a Friday; counting it that way made the check fire every
+Monday and Tuesday, which is how an alert ends up being ignored. The unit is printed in
+`expected` so the row says how it was measured.
+
 This file is not committed. Staleness is measured against the run date, so a checked-in
 copy would disagree with the code that wrote it the next day, and the integration suite
 compares committed artifacts byte-for-byte.
+
+## Onboard a second dataset
+
+`python -m etl.load_market_prices` fetches daily closing prices from a public source
+and takes them through the same registration the loan datamart uses: a source system,
+a `datasets` row, field definitions, a `vendor_usage` record and an
+`INFORMATION_SCHEMA` scan. It is deliberately not a step in `main.py` — a pipeline
+that reaches the network reports on someone else's uptime — and it commits no market
+data, because the redistribution right is recorded as unconfirmed. The values land in
+the database and in gitignored `reports/local/market_fetch.json`.
+
+`docs/support_runbook.md` is the operational half: how to tell a stale feed from a
+weekend, what the source's blank `close_value` rows mean, and which failures mean the
+fetch never happened at all.
 
 ## Vendor records
 

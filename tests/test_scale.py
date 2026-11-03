@@ -128,7 +128,7 @@ def test_seeded_defects_are_reported_and_the_late_file_is_stale(scaled):
     assert wide[wide.subject == 'metric_004'].value.item() == 50
     freshness = wide[wide.check == 'freshness']
     assert freshness.status.item() == 'stale'
-    assert freshness.expected.item() == '<= 2 days'
+    assert freshness.expected.item() == '<= 2 weekdays'
     assert freshness.value.item() == WIDE_PARTITION.isoformat()
     narrow = frame[(frame.dataset_name == 'synthetic_narrow_datamart')
                    & (frame.check == 'freshness')]

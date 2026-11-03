@@ -12,7 +12,7 @@ is the data owner's call, and this only surfaces the count.
 """
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -23,9 +23,13 @@ from config.db_config import get_engine
 ROOT = Path(__file__).resolve().parents[1]
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# Declared cadence to tolerated age, with one interval of slack. Keys are
+# Declared cadence to (tolerated age, unit), with one interval of slack. Keys are
 # compared lower-cased because refresh_frequency is free text in the registry.
-MAX_AGE_DAYS = {"daily": 2, "weekly": 9, "monthly": 33}
+# A daily file is published on trading days only, so its age is counted in
+# weekdays: a Friday snapshot read on the Tuesday is two days late and nothing
+# like a stale feed. Weekly and monthly extracts are calendar-dated, so a
+# weekend is part of their interval and they are counted in calendar days.
+CADENCE_TOLERANCE = {"daily": (2, "weekdays"), "weekly": (9, "days"), "monthly": (33, "days")}
 
 COLUMNS = ["dataset_name", "check", "subject", "value", "expected", "status"]
 
@@ -85,6 +89,17 @@ def _as_date(value):
     return date.fromisoformat(str(value)[:10])
 
 
+def _elapsed(latest, as_of, unit):
+    """Age of a snapshot in the unit its own cadence is written in."""
+    if unit != "weekdays":
+        return (as_of - latest).days
+    return sum(
+        1
+        for offset in range(1, (as_of - latest).days + 1)
+        if (latest + timedelta(days=offset)).weekday() < 5
+    )
+
+
 def _freshness(conn, table, column, cadence, as_of):
     raw = conn.exec_driver_sql(
         f"SELECT MAX({_quote(column)}) FROM {_quote(table)}"
@@ -95,16 +110,16 @@ def _freshness(conn, table, column, cadence, as_of):
         latest = _as_date(raw)
     except ValueError:
         return str(raw), "review", "an ISO date"
-    age = (as_of - latest).days
-    if age < 0:
+    if as_of < latest:
         return str(latest), "review", "not dated after the run"
-    tolerated = MAX_AGE_DAYS.get(str(cadence or "").strip().lower())
-    if tolerated is None:
+    tolerance = CADENCE_TOLERANCE.get(str(cadence or "").strip().lower())
+    if tolerance is None:
         return str(latest), "unknown", f"cadence {cadence or 'unset'}"
+    tolerated, unit = tolerance
     return (
         str(latest),
-        ("stale" if age > tolerated else "current"),
-        f"<= {tolerated} days",
+        ("stale" if _elapsed(latest, as_of, unit) > tolerated else "current"),
+        f"<= {tolerated} {unit}",
     )
 
 

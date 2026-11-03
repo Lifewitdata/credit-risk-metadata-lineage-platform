@@ -71,7 +71,7 @@ report on runner load. What the test does assert is structural —
   queries;
 - exactly one aggregate statement touches the wide table;
 - the never-populated and sparsely populated columns are the only `review` null
-  findings, the 40-day-old partition is `stale` against `<= 2 days`, and the
+  findings, the 40-day-old partition is `stale` against `<= 2 weekdays`, and the
   one-day-old control partition is `current` under the same cadence — so `stale` is
   the file, not the tolerance table.
 
@@ -146,12 +146,59 @@ On 2026-11-03, from merged `main` (`e6c0dbd`) into a clean directory with a new
   'metadata_platform_user'@'localhost'`, which is what a placeholder password should
   produce.
 
-Not executed: `setup_database.py` against a live server, `main.py`, and
-`CATALOG_TEST_MYSQL=1 pytest`. No MySQL server was reachable from this environment, so
-the documented fresh-install path is proven up to the connection, not end to end.
-Actions covers part of that gap, because the `engine` fixture creates an empty schema,
-runs `setup()` and then `main.py`, but that is a service container rather than the
-README being followed by hand.
+Not executed *from this clone*: `setup_database.py` against a live server, `main.py`,
+and `CATALOG_TEST_MYSQL=1 pytest`. No MySQL server was reachable in the clean-clone
+environment, so the documented fresh-install path is proven there only up to the
+connection. The next section covers the same three commands against a throwaway
+MySQL 8.0.46 from the working tree — that closes the behaviour gap, not the
+"someone who did not write this followed the README" gap. Actions covers part of that
+too, because the `engine` fixture creates an empty schema, runs `setup()` and then
+`main.py`, but that is a service container rather than the README being followed by
+hand.
+
+## Executed against a real MySQL 8.0 server, by hand
+
+On 2026-11-03 the documented path was run locally rather than only in a service
+container: a throwaway MySQL 8.0.46 in its own data directory on port 3317, bound to
+127.0.0.1, with no user database involved.
+
+- `python scripts/setup_database.py` then `python main.py` against an empty schema:
+  completed, 6 steps, pipeline in 1.90s.
+- `CATALOG_TEST_MYSQL=1 python -m pytest -q tests/test_mysql.py` against a **second,
+  empty** database on the same server: 7 passed in 32.25s. The suite refuses a schema
+  that already exists, so it needs its own database.
+- `python -m etl.load_market_prices`: downloaded 2,607 daily observations, registered
+  `market_close_prices_daily` with 4 documented fields, recorded a schema scan, and
+  wrote gitignored `reports/local/market_fetch.json`. The reconciliation reports that
+  dataset 4/4 `DOCUMENTED` at 100% coverage, and `python -m metadata.data_quality`
+  returns 26 checks for the two datasets, including `close_value` with 96 nulls.
+- `python main.py` again afterwards: only the auto-generated timestamps in the two
+  markdown reports moved. The reports are written per dataset for
+  `credit_datamart_sme_loans`, so a second registered dataset does not leak into the
+  committed documents — which is what makes it safe to keep the market loader out of
+  the pipeline while still exercising the catalog with two datasets.
+
+`sql/validation/03_market_freshness.sql` was run through the `mysql` client against
+all three states it can report, using deliberately damaged copies of the loaded data
+(re-restored by re-fetching):
+
+| State | Output |
+|---|---|
+| as downloaded | `current`, `calendar_days_since_last_row = 4`, `trading_days_since_last_price = 2` |
+| last close blanked and one weekday deleted | `stale`, `last_priced_day` one day earlier, `holiday_rows_in_window = 1`, `weekdays_without_row_in_window = 1` |
+| table truncated | `no_data`, all window counts 0 |
+
+Writing the query caught a real bug: `bounds.last_day` was `MIN(trading_day)` instead
+of `MAX`, so the hole count silently measured the wrong end of the series and always
+returned 0. It was found by running it, not by reading it, which is the reason this
+section exists. The MySQL client run also fixed the earlier assumption that the
+source drops holiday rows: it keeps them with a blank `close_value`, so 96 of 2,607
+rows are exchange holidays and the verdict has to follow the last *priced* day.
+
+The two `vendor_usage` and scorecard assertions in `tests/test_mysql.py` are now
+scoped to the governed dataset by name, because they previously counted rows and so
+would fail on any database where a second dataset or vendor had been onboarded —
+including one where someone followed this runbook.
 
 ## Not yet claimed
 

@@ -31,6 +31,7 @@ usage permissions remain explicitly unconfirmed.
 - [Column-by-column extract spec](docs/extract_spec.md) and the [intake and triage register](docs/intake_triage.md)
   the requests arrive through.
 - [AI-assisted mapping log](docs/ai_mapping_log.md): what a model drafted, what was refused and why.
+- [Support runbook](docs/support_runbook.md): "why hasn't the closing price updated?" — the freshness query, the holiday rows, and what each verdict means.
 - [Rule snapshot with evidence/status columns](data/raw/transformation_rules.csv).
 - [Vendor usage register seed](data/raw/vendor_usage.csv).
 - [Validation record](docs/validation.md).
@@ -64,9 +65,10 @@ run, including `reports/local/data_quality.csv`.
 | Vendor records | Dataset scope, use restrictions, customer display, redistribution, review/renewal dates and open questions |
 | Calculation QA | Independent loan/revenue reconciliation; missing/zero denominators remain blocked |
 | Excel deliverable | The reconciliation as a four-tab workbook whose expected ratio, counts and maximum drift are live formulas; compared cell by cell because a zip entry cannot be compared byte for byte |
-| Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed |
+| Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed. A `Daily` cadence is tolerated in weekdays, because a Friday close read on the Tuesday is not four days late |
+| External onboarding | `python -m etl.load_market_prices` registers a second dataset (daily closing prices from a public source) through the same source-system, registry, dictionary, vendor and schema-scan steps as the governed datamart. Run by hand, never from the pipeline, and no market data is committed: its redistribution right is unconfirmed |
 | Scale evidence | The data-quality pass measured on 1,000 rows x 100 synthetic fields: one aggregate query per dataset regardless of width. A never-populated column and a late file are reported; the seeded duplicate key is asserted to be a gap, because nothing in this project checks uniqueness. Wall clock is reported, not asserted, and no other loader is scale-tested |
-| Tests | 31 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
+| Tests | 34 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
 
 Schema conformity and verification are separate: a correctly typed field can
 still have an unconfirmed business definition. The scorecard's coverage metric

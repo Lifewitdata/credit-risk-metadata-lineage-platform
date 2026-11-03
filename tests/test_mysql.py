@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import pandas as pd
 from sqlalchemy import text
 
 pytestmark = pytest.mark.skipif(os.getenv('CATALOG_TEST_MYSQL') != '1',
@@ -124,11 +125,20 @@ def test_repeat_pipeline_run_changes_nothing(engine):
 def test_current_version_guard_and_issue_closure(engine):
     from metadata.dictionary_service import update_field_definition, FieldDefinition
     from metadata.governance import sync_schema_issues
+    shipped_vendors = pd.read_csv(ROOT / 'data/raw/vendor_usage.csv',
+                                  keep_default_na=False)['vendor_name'].tolist()
+    assert len(shipped_vendors) == 6
     with engine.connect() as c:
         ds = c.execute(text("SELECT dataset_id FROM datasets WHERE dataset_name='credit_datamart_sme_loans'")).scalar_one()
-        assert c.execute(text('SELECT documentation_coverage_pct FROM vw_governance_scorecard')).scalar_one() == 100
-        assert c.execute(text("SELECT COUNT(*) FROM vendor_usage WHERE customer_display='unconfirmed'")).scalar_one() == 6
-
+        # Scoped to the governed dataset: onboarding a second one through
+        # etl/load_market_prices.py adds a row to the scorecard and to vendor_usage,
+        # and this assertion is about the fixture, not about how many datasets a
+        # given database happens to have.
+        assert c.execute(text("SELECT documentation_coverage_pct FROM vw_governance_scorecard "
+                              "WHERE dataset_name='credit_datamart_sme_loans'")).scalar_one() == 100
+        unconfirmed = set(c.execute(text(
+            "SELECT vendor_name FROM vendor_usage WHERE customer_display='unconfirmed'")).scalars())
+        assert set(shipped_vendors) <= unconfirmed
     def revise(label):
         try:
             update_field_definition(engine, ds, 'loan_id', FieldDefinition(description=label),
