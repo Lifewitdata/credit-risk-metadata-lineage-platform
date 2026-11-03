@@ -1,5 +1,7 @@
 SQLAlchemy>=2.0
 pymysql>=1.1
+# PyMySQL needs cryptography for MySQL 8's default caching_sha2_password auth.
+cryptography>=42.0
 pandas>=2.0
 python-dotenv>=1.0
 networkx>=3.2

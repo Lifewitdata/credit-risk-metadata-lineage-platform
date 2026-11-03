@@ -19,6 +19,7 @@ the relational tables.
 """
 
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import networkx as nx
@@ -39,13 +40,15 @@ def build_graph(engine: Engine) -> nx.DiGraph:
     the tables were populated in Step 5."""
     graph = nx.DiGraph()
 
-    with engine.connect() as conn:
+    with (engine.connect() if hasattr(engine, 'connect') else nullcontext(engine)) as conn:
         nodes = conn.execute(
             text(
                 """
                 SELECT n.node_id, d.dataset_name, n.field_name, n.node_type
                 FROM lineage_nodes n
                 JOIN datasets d ON d.dataset_id = n.dataset_id
+                WHERE n.is_active=1
+                ORDER BY d.dataset_name, n.field_name
                 """
             )
         ).mappings().fetchall()
@@ -55,7 +58,9 @@ def build_graph(engine: Engine) -> nx.DiGraph:
                 """
                 SELECT e.source_node_id, e.target_node_id, tr.rule_name, tr.transformation_type
                 FROM lineage_edges e
-                LEFT JOIN transformation_rules tr ON tr.rule_id = e.rule_id
+                JOIN transformation_rules tr ON tr.rule_id = e.rule_id
+                WHERE e.is_active=1 AND tr.is_active=1
+                ORDER BY tr.rule_name, e.source_node_id, e.target_node_id
                 """
             )
         ).mappings().fetchall()

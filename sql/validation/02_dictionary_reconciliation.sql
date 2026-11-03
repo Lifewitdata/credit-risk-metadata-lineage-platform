@@ -23,13 +23,10 @@ USE credit_metadata_platform;
 CREATE OR REPLACE VIEW vw_latest_schema_snapshot AS
 SELECT s.dataset_id, s.column_name, s.physical_data_type, s.ordinal_position, s.scan_timestamp
 FROM physical_schema_snapshot s
-INNER JOIN (
-    SELECT dataset_id, MAX(scan_timestamp) AS max_scan
-    FROM physical_schema_snapshot
-    GROUP BY dataset_id
-) latest
-    ON s.dataset_id = latest.dataset_id
-   AND s.scan_timestamp = latest.max_scan;
+JOIN physical_schema_snapshot latest ON latest.snapshot_id = (
+    SELECT MAX(x.snapshot_id) FROM physical_schema_snapshot x WHERE x.dataset_id=s.dataset_id
+)
+WHERE s.scan_id=latest.scan_id OR (s.scan_id IS NULL AND latest.scan_id IS NULL AND s.scan_timestamp=latest.scan_timestamp);
 
 
 -- ----------------------------------------------------------------------------
@@ -97,12 +94,12 @@ CREATE OR REPLACE VIEW vw_governance_scorecard AS
 SELECT
     d.dataset_id,
     d.dataset_name,
-    COUNT(*)                                                                   AS total_fields,
+    SUM(r.governance_status <> 'DEPRECATED') AS total_fields,
     SUM(r.governance_status = 'DOCUMENTED')                                    AS documented_count,
     SUM(r.governance_status = 'UNDOCUMENTED')                                  AS undocumented_count,
     SUM(r.governance_status = 'DEPRECATED')                                    AS deprecated_count,
     SUM(r.governance_status = 'TYPE_MISMATCH')                                 AS type_mismatch_count,
-    ROUND(100 * SUM(r.governance_status = 'DOCUMENTED') / COUNT(*), 1)         AS documentation_coverage_pct
+    ROUND(100 * SUM(r.governance_status = 'DOCUMENTED') / NULLIF(SUM(r.governance_status <> 'DEPRECATED'),0), 1)         AS documentation_coverage_pct
 FROM vw_data_dictionary_reconciliation r
 JOIN datasets d ON d.dataset_id = r.dataset_id
 GROUP BY d.dataset_id, d.dataset_name;

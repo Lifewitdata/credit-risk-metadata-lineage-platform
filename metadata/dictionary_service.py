@@ -50,7 +50,7 @@ def _get_current_version(conn, dataset_id: int, field_name: str) -> dict:
             """
             SELECT * FROM data_dictionary
             WHERE dataset_id = :dataset_id AND field_name = :field_name AND is_current = 1
-            """
+            """ + (" FOR UPDATE" if conn.dialect.name == "mysql" else "")
         ),
         {"dataset_id": dataset_id, "field_name": field_name},
     ).mappings().fetchone()
@@ -89,6 +89,7 @@ def update_field_definition(
     """
     with engine.begin() as conn:
         current = _get_current_version(conn, dataset_id, field_name)
+        current["valid_from"] = date.fromisoformat(str(current["valid_from"]))
 
         if effective_date <= current["valid_from"]:
             raise ValueError(
@@ -105,17 +106,17 @@ def update_field_definition(
                 WHERE dictionary_id = :id
                 """
             ),
-            {"close_date": close_date, "id": current["dictionary_id"]},
+            {"close_date": close_date.isoformat(), "id": current["dictionary_id"]},
         )
 
         # Merge: any field left None in `changes` carries forward the value
         # from the version we just closed.
         merged = {
-            "description": changes.description or current["description"],
-            "data_type": changes.data_type or current["data_type"],
-            "valid_range": changes.valid_range or current["valid_range"],
-            "known_issues": changes.known_issues or current["known_issues"],
-            "business_owner": changes.business_owner or current["business_owner"],
+            "description": current["description"] if changes.description is None else changes.description,
+            "data_type": current["data_type"] if changes.data_type is None else changes.data_type,
+            "valid_range": current["valid_range"] if changes.valid_range is None else changes.valid_range,
+            "known_issues": current["known_issues"] if changes.known_issues is None else changes.known_issues,
+            "business_owner": current["business_owner"] if changes.business_owner is None else changes.business_owner,
         }
 
         conn.execute(
@@ -134,7 +135,7 @@ def update_field_definition(
             {
                 "dataset_id": dataset_id,
                 "field_name": field_name,
-                "valid_from": effective_date,
+                "valid_from": effective_date.isoformat(),
                 **merged,
             },
         )
@@ -181,48 +182,33 @@ def get_definition_as_of(
     with engine.connect() as conn:
         row = conn.execute(
             text(query),
-            {"dataset_id": dataset_id, "field_name": field_name, "as_of_date": as_of_date},
+            {"dataset_id": dataset_id, "field_name": field_name, "as_of_date": as_of_date.isoformat()},
         ).mappings().fetchone()
     return dict(row) if row else None
 
 
-if __name__ == "__main__":
-    # --- Demonstration: version the commercial_credit_score redefinition ---
-    engine = get_engine()
+def apply_demo_revision(engine):
+    """Idempotent fixture correction; not a verified external vendor change."""
+    with engine.connect() as conn:
+        dataset_id = conn.execute(text("SELECT dataset_id FROM datasets WHERE dataset_name='credit_datamart_sme_loans'")).scalar_one()
+    # One-time repair of the known legacy fixture's incorrect initial effective date.
+    # Restricted to the exact shipped definition and a single history row.
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT dictionary_id,description,valid_from FROM data_dictionary WHERE dataset_id=:ds AND field_name='commercial_credit_score'"), {'ds':dataset_id}).mappings().all()
+        if len(rows)==1 and str(rows[0]['valid_from'])=='2024-04-02' and rows[0]['description']=='Bureau risk score (0-100, higher is better)':
+            conn.execute(text("UPDATE data_dictionary SET valid_from='2024-01-15' WHERE dictionary_id=:id"),{'id':rows[0]['dictionary_id']})
+    revenue = get_definition_as_of(engine,dataset_id,'annual_revenue_gbp',date.today())
+    if revenue and revenue['data_type']=='integer':
+        update_field_definition(engine,dataset_id,'annual_revenue_gbp',FieldDefinition(data_type='float'),date.today(),'schema_type_correction')
+    current = get_definition_as_of(engine, dataset_id, 'commercial_credit_score', date(2024, 4, 2))
+    if current and current['valid_range'] == '1-30 (lower = lower risk)':
+        return
+    update_field_definition(engine, dataset_id, 'commercial_credit_score', FieldDefinition(
+        description='Illustrative bureau score: 1-30, lower is better, from 2024-04-02; vendor methodology unverified.',
+        valid_range='1-30 (lower = lower risk)',
+        known_issues='Demo scale change only. Vendor evidence and cross-scale mapping remain unconfirmed.'
+    ), date(2024, 4, 2), 'demo_revision')
 
-    print("BEFORE:")
-    print(get_definition_history(engine, dataset_id=1, field_name="commercial_credit_score"))
 
-    update_field_definition(
-        engine=engine,
-        dataset_id=1,
-        field_name="commercial_credit_score",
-        changes=FieldDefinition(
-            description=(
-                "Bureau-supplied commercial credit risk score. NOTE: bureau "
-                "changed scoring methodology on 2024-04-02, moving from a "
-                "0-100 scale (higher = better) to a 1-30 risk-tier scale "
-                "(lower = better). Values prior to 2024-04-02 use the old "
-                "scale; see valid_range."
-            ),
-            valid_range="1-30 (lower = lower risk), effective 2024-04-02",
-            known_issues=(
-                "Scale change on 2024-04-02 is a breaking change for any "
-                "downstream model trained on the pre-2024-04-02 scale. "
-                "Do not compare scores across the boundary without rescaling."
-            ),
-        ),
-        effective_date=date(2024, 5, 1),
-        changed_by="jane.doe@bank.com",
-    )
-
-    print("\nAFTER:")
-    print(get_definition_history(engine, dataset_id=1, field_name="commercial_credit_score"))
-
-    print("\nPoint-in-time lookup, as of 2024-03-01 (should be the ORIGINAL version):")
-    print(get_definition_as_of(engine, dataset_id=1, field_name="commercial_credit_score",
-                                as_of_date=date(2024, 3, 1)))
-
-    print("\nPoint-in-time lookup, as of 2024-06-01 (should be the NEW version):")
-    print(get_definition_as_of(engine, dataset_id=1, field_name="commercial_credit_score",
-                                as_of_date=date(2024, 6, 1)))
+if __name__ == '__main__':
+    apply_demo_revision(get_engine())

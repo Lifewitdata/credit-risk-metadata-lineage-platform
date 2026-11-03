@@ -37,24 +37,26 @@ NODE_COLORS = {
 }
 
 
-def _assign_layers(graph: nx.DiGraph) -> dict[str, int]:
-    """Layer = topological generation index. Root nodes (External Feed
-    boundaries, in-degree 0) sit at layer 0; each generation after that is
-    one hop further along the DAG."""
-    layers = {}
-    for layer_idx, generation in enumerate(nx.topological_generations(graph)):
-        for node in generation:
-            layers[node] = layer_idx
-    return layers
+def _layered_nodes(graph: nx.DiGraph) -> dict[int, list[str]]:
+    """Nodes grouped by topological generation, each group in a fixed order.
+
+    Root nodes (External Feed boundaries, in-degree 0) form layer 0 and each
+    generation after that is one hop further along the DAG. Passing this dict to
+    multipartite_layout is the only way to get a stable picture: given a node
+    attribute it groups nodes with nx.utils.groups, which returns sets, so
+    within-layer order -- and therefore node position -- would follow the
+    interpreter's hash seed instead of the data, and a regenerated PNG would
+    never match the committed one.
+    """
+    return {
+        layer_idx: sorted(generation)
+        for layer_idx, generation in enumerate(nx.topological_generations(graph))
+    }
 
 
 def plot_static(graph: nx.DiGraph, output_path: Path) -> Path:
-    layers = _assign_layers(graph)
-    nx.set_node_attributes(graph, layers, name="layer")
-
-    # multipartite_layout arranges nodes into columns by the 'layer'
-    # attribute -- exactly the hierarchical, flow-oriented layout we want.
-    pos = nx.multipartite_layout(graph, subset_key="layer", align="vertical")
+    # Columns by topological layer, so the image reads left-to-right as data flow.
+    pos = nx.multipartite_layout(graph, subset_key=_layered_nodes(graph), align="vertical")
 
     node_colors = [NODE_COLORS[graph.nodes[n]["node_type"]] for n in graph.nodes]
     labels = {n: graph.nodes[n]["field_name"] for n in graph.nodes}
@@ -125,6 +127,10 @@ def plot_interactive(graph: nx.DiGraph, output_path: Path) -> Path:
 
     net.show_buttons(filter_=["physics"])
     net.write_html(str(output_path), open_browser=False, notebook=False)
+    # pyvis writes with the platform newline, so on Windows the committed HTML
+    # would differ from the file only by line endings. Generated reports are
+    # compared byte-for-byte against the repository, so pin them to LF here.
+    output_path.write_bytes(output_path.read_bytes().replace(b"\r\n", b"\n"))
 
     print(f"[visualize] wrote interactive HTML: {output_path}")
     return output_path

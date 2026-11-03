@@ -1,196 +1,254 @@
+"""Validate an authoritative dataset rule snapshot, then reconcile it atomically.
+
+Missing rules/edges are retired, never erased. Revisions retain before/after
+evidence. Each row of the snapshot is one INPUT RELATIONSHIP (source field ->
+target field), so a rule is stated once canonically and every relationship
+carries its own source identity, transformation, evidence and verification date.
 """
-load_transformation_rules.py
-------------------------------
-Step 5: Load transformation_rules.csv and materialize it into three tables:
-
-  transformation_rules  -- one row per unique rule (deduplicated by rule_name)
-  lineage_nodes          -- one row per distinct field (or external feed)
-  lineage_edges           -- one row per (source_node -> target_node) pair,
-                              linked back to the rule that explains it
-
-Design notes:
-- Upstream systems (Salesforce, Experian, Companies House, etc.) are
-  registered as pseudo-datasets with physical_table_name='EXTERNAL_FEED'.
-  This lets a bureau feed be a first-class lineage_node even though it has
-  no physical table of its own in this platform -- lineage needs to show
-  "where did this ultimately come from", not just "what's in our database".
-- A field's node_type is inferred, not hand-labeled: if ANY transformation
-  rule targets it with source_kind='Internal', it's a Derived Field
-  (computed from other datamart fields). Otherwise, if it appears as a
-  target at all, it's a Source Field (raw ingest, no in-datamart
-  calculation). This keeps the classification consistent with the CSV
-  as the single source of truth, rather than a second hand-maintained list.
-"""
-
-import sys
+import json
+from datetime import date
 from pathlib import Path
 
+import networkx as nx
 import pandas as pd
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-from config.db_config import get_engine  # noqa: E402
+RULES_CSV = Path(__file__).resolve().parents[1] / 'data/raw/transformation_rules.csv'
+TARGET_DATASET_NAME = 'credit_datamart_sme_loans'
 
-RULES_CSV = Path(__file__).resolve().parent.parent / "data" / "raw" / "transformation_rules.csv"
-TARGET_DATASET_NAME = "credit_datamart_sme_loans"
+# Same value on every row of a rule -> one canonical definition per rule.
+RULE_COLUMNS = ['target_field', 'transformation_type', 'transformation_logic',
+                'business_justification', 'created_by', 'verification_status',
+                'evidence_ref', 'verified_at', 'verified_by']
 
+# Per-relationship columns: stored on lineage_edges, not on the rule.
+RELATIONSHIP_COLUMNS = ['source_kind', 'source_ref', 'source_dataset', 'source_field',
+                        'source_mapping_label', 'source_transformation',
+                        'source_verification_status', 'source_evidence_ref',
+                        'source_verified_at']
 
-def _get_or_create_dataset(conn, dataset_name: str, is_external: bool) -> int:
-    row = conn.execute(
-        text("SELECT dataset_id FROM datasets WHERE dataset_name = :name"),
-        {"name": dataset_name},
-    ).fetchone()
-    if row:
-        return row[0]
-
-    if not is_external:
-        raise ValueError(
-            f"Internal dataset '{dataset_name}' does not exist yet -- it "
-            f"should already be registered by etl/load_raw.py (Step 2)."
-        )
-
-    result = conn.execute(
-        text(
-            """
-            INSERT INTO datasets (dataset_name, physical_table_name, description, refresh_frequency, business_owner)
-            VALUES (:name, 'EXTERNAL_FEED', :desc, 'N/A', 'Upstream System Owner')
-            """
-        ),
-        {
-            "name": dataset_name,
-            "desc": f"Pseudo-dataset representing the upstream '{dataset_name}' "
-                    f"source system as a lineage boundary. No physical table -- "
-                    f"registered for lineage traceability only.",
-        },
-    )
-    print(f"[datasets] registered external feed pseudo-dataset: {dataset_name}")
-    return result.lastrowid
+TRANSFORMATION_TYPES = {'Direct Copy', 'Calculated', 'Aggregated', 'Mapped/Coded', 'Bureau Feed'}
+# illustrative = named for readability with no vendor specification on file, so it
+# can never be self-certified; vendor-spec = a real specification exists and must be
+# cited; local-data = an internal column the loader can verify against the schema scan.
+MAPPING_LABELS = {'illustrative', 'vendor-spec', 'local-data'}
 
 
-def _get_or_create_node(conn, dataset_id: int, field_name: str, node_type: str) -> int:
-    row = conn.execute(
-        text(
-            "SELECT node_id FROM lineage_nodes WHERE dataset_id = :ds AND field_name = :field"
-        ),
-        {"ds": dataset_id, "field": field_name},
-    ).fetchone()
-    if row:
-        return row[0]
-
-    result = conn.execute(
-        text(
-            """
-            INSERT INTO lineage_nodes (dataset_id, field_name, node_type)
-            VALUES (:ds, :field, :node_type)
-            """
-        ),
-        {"ds": dataset_id, "field": field_name, "node_type": node_type},
-    )
-    return result.lastrowid
+def _parse_date(value, label):
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f'{label}: {value!r} is not an ISO date')
+    if parsed > date.today():
+        raise ValueError(f'{label} cannot be in the future: {value}')
+    return parsed
 
 
-def load(engine: Engine) -> None:
-    rules_df = pd.read_csv(RULES_CSV)
+def validate_rules(frame):
+    """Reject a snapshot that is not safe to reconcile against."""
+    required = {'rule_name', 'target_dataset', *RULE_COLUMNS, *RELATIONSHIP_COLUMNS}
+    if not required.issubset(frame.columns) or frame.empty:
+        raise ValueError('Rule snapshot is empty or missing required columns; refusing to retire everything.')
+    frame = frame.fillna('').copy()
+    for col in frame:
+        frame[col] = frame[col].astype(str).str.strip()
+    if set(frame.target_dataset) != {TARGET_DATASET_NAME}:
+        raise ValueError('Snapshot must contain only the governed dataset.')
 
-    # A field is Derived if ANY rule targeting it has source_kind == 'Internal'.
-    derived_fields = set(
-        rules_df.loc[rules_df["source_kind"] == "Internal", "target_field"].unique()
-    )
+    for name, group in frame.groupby('rule_name'):
+        row = group.iloc[0]
+        if not name or any(group[c].nunique(dropna=False) != 1 for c in RULE_COLUMNS):
+            raise ValueError(f'Conflicting or blank canonical definition for {name}')
+        if not row.target_field or not row.transformation_logic:
+            raise ValueError(f'{name}: target field and canonical formula are required')
+        if row.transformation_type not in TRANSFORMATION_TYPES:
+            raise ValueError(f'{name}: unknown transformation type {row.transformation_type}')
+        if row.verification_status not in {'draft', 'confirmed'}:
+            raise ValueError(f'{name}: unknown rule verification status')
+        if row.verification_status == 'confirmed':
+            if not all(row[c] for c in ['evidence_ref', 'verified_at', 'verified_by']):
+                raise ValueError(f'{name}: confirmed rules require evidence, reviewer and date')
+            _parse_date(row.verified_at, f'{name} verified_at')
+            unconfirmed = group[group.source_verification_status != 'confirmed']
+            if not unconfirmed.empty:
+                raise ValueError(
+                    f'{name}: rule cannot be confirmed while '
+                    f'{len(unconfirmed)} input relationship(s) are unconfirmed')
 
+        if len(group) != len(group.drop_duplicates(subset=RELATIONSHIP_COLUMNS)):
+            raise ValueError(f'{name}: duplicate input relationship rows')
+
+        for rel in group.itertuples():
+            label, status = rel.source_mapping_label, rel.source_verification_status
+            if not rel.source_ref or not rel.source_dataset or not rel.source_field:
+                raise ValueError(f'{name}: relationship source dataset/field must be named')
+            if not rel.source_transformation:
+                raise ValueError(f'{name}: relationship {rel.source_field} needs its own transformation note')
+            if label not in MAPPING_LABELS:
+                raise ValueError(f'{name}: unknown source mapping label {label!r}')
+            if status not in {'draft', 'confirmed'}:
+                raise ValueError(f'{name}: unknown relationship verification status')
+            if status == 'confirmed':
+                if not rel.source_evidence_ref:
+                    raise ValueError(f'{name}/{rel.source_field}: confirmed relationship needs an evidence reference')
+                _parse_date(rel.source_verified_at, f'{name}/{rel.source_field} source_verified_at')
+            else:
+                if rel.source_evidence_ref or rel.source_verified_at:
+                    raise ValueError(f'{name}/{rel.source_field}: draft relationships cannot cite evidence or a date')
+            if rel.source_kind == 'Internal':
+                if rel.source_dataset != TARGET_DATASET_NAME or rel.source_field != rel.source_ref:
+                    raise ValueError(f'{name}: internal source identity mismatch')
+                if label != 'local-data':
+                    raise ValueError(f'{name}: internal sources are verifiable, so label them local-data')
+                if status != 'confirmed':
+                    raise ValueError(f'{name}: internal source {rel.source_field} must be confirmed against the schema')
+                if rel.source_field not in row.transformation_logic:
+                    raise ValueError(
+                        f'{name}: canonical formula omits declared input {rel.source_field}')
+            elif label == 'local-data':
+                raise ValueError(f'{name}: local-data is reserved for internal sources')
+            elif label == 'illustrative':
+                if status == 'confirmed':
+                    raise ValueError(f'{name}: illustrative mapping cannot be confirmed')
+
+    if frame.groupby('target_field').rule_name.nunique().max() > 1:
+        raise ValueError('One active canonical rule per target is required')
+
+    graph = nx.DiGraph()
+    for rel in frame[frame.source_kind == 'Internal'].itertuples():
+        graph.add_edge(rel.source_ref, rel.target_field)
+    if not nx.is_directed_acyclic_graph(graph):
+        raise ValueError('Rule snapshot contains a cycle')
+    return frame
+
+
+def audit(conn, kind, key, action, old, new):
+    conn.execute(text('''INSERT INTO lineage_change_log
+        (entity_type,entity_id,action,old_json,new_json,changed_by)
+        VALUES (:kind,:key,:action,:old,:new,:actor)'''),
+        dict(kind=kind, key=key, action=action,
+             old=json.dumps(old, default=str) if old is not None else None,
+             new=json.dumps(new, default=str) if new is not None else None,
+             actor='lineage_snapshot_loader'))
+
+
+def upsert(conn, table, identity, values, kind):
+    # Table/column names are supplied only by this module.
+    pk = {'transformation_rules': 'rule_id', 'lineage_nodes': 'node_id',
+          'lineage_edges': 'edge_id'}[table]
+    where = ' AND '.join(f'{k}=:{k}' for k in identity)
+    old = conn.execute(text(f'SELECT * FROM {table} WHERE {where}'), identity).mappings().first()
+    values = {**values, 'is_active': 1}
+    if old:
+        changed = any((str(old[k]) if old[k] is not None else None) != (str(v) if v is not None else None)
+                      for k, v in values.items())
+        if changed:
+            conn.execute(text(f'UPDATE {table} SET ' + ','.join(f'{k}=:v_{k}' for k in values) + f' WHERE {pk}=:key'),
+                         {**{f'v_{k}': v for k, v in values.items()}, 'key': old[pk]})
+            audit(conn, kind, old[pk], 'update', dict(old), {**dict(old), **values})
+        return old[pk]
+    data = {**identity, **values}
+    result = conn.execute(text(f'INSERT INTO {table} (' + ','.join(data) + ') VALUES ('
+                               + ','.join(':' + k for k in data) + ')'), data)
+    key = result.lastrowid
+    audit(conn, kind, key, 'insert', None, data)
+    return key
+
+
+def _physical_columns(conn, dataset_id):
+    """Columns present in the most recent schema scan of the governed table."""
+    rows = conn.execute(text('''SELECT column_name FROM vw_latest_schema_snapshot
+                                WHERE dataset_id=:ds'''), {'ds': dataset_id}).scalars().all()
+    return set(rows)
+
+
+def load(engine, rules_path=RULES_CSV):
+    frame = validate_rules(pd.read_csv(rules_path, keep_default_na=False))
+    derived = set(frame.loc[(frame.source_kind == 'Internal')
+                            | (frame.transformation_type == 'Calculated'), 'target_field'])
     with engine.begin() as conn:
-        target_dataset_id = _get_or_create_dataset(conn, TARGET_DATASET_NAME, is_external=False)
+        lock = ' FOR UPDATE' if conn.dialect.name == 'mysql' else ''
+        ds = conn.execute(text('SELECT dataset_id FROM datasets WHERE dataset_name=:name' + lock),
+                          {'name': TARGET_DATASET_NAME}).scalar_one()
 
-        rule_id_cache: dict[str, int] = {}
-        edges_created = 0
+        claimed = set(frame.target_field) | set(frame.loc[frame.source_kind == 'Internal', 'source_field'])
+        missing = sorted(claimed - _physical_columns(conn, ds))
+        if missing:
+            raise ValueError(f'Snapshot references fields absent from the latest schema scan: {missing}')
 
-        for _, row in rules_df.iterrows():
-            rule_name = row["rule_name"]
+        open_issue_fields = set(conn.execute(text('''SELECT field_name FROM governance_issues
+            WHERE dataset_id=:ds AND status<>'resolved' AND field_name IS NOT NULL'''),
+            {'ds': ds}).scalars().all())
 
-            # 1. transformation_rules -- one row per unique rule_name (dedupe
-            #    across the multiple CSV rows that share a fan-in rule).
-            #    IMPORTANT: check the DATABASE, not just this run's in-memory
-            #    cache -- otherwise re-running this script duplicates every
-            #    rule (caught by actually re-running it: 11 rules became 22).
-            if rule_name not in rule_id_cache:
-                existing_rule = conn.execute(
-                    text(
-                        "SELECT rule_id FROM transformation_rules WHERE rule_name = :rule_name"
-                    ),
-                    {"rule_name": rule_name},
-                ).fetchone()
-
-                if existing_rule:
-                    rule_id_cache[rule_name] = existing_rule[0]
+        desired_rules, desired_edges, desired_nodes = set(), set(), set()
+        for name, group in frame.groupby('rule_name', sort=True):
+            row = group.iloc[0]
+            if row.verification_status == 'confirmed' and row.target_field in open_issue_fields:
+                raise ValueError(
+                    f'{name}: cannot confirm a rule while an open governance issue '
+                    f'targets {row.target_field}')
+            values = {k: (row[k] or None) for k in RULE_COLUMNS}
+            values['target_dataset_id'] = ds
+            rule = upsert(conn, 'transformation_rules', {'rule_name': name}, values, 'rule')
+            desired_rules.add(rule)
+            target = upsert(conn, 'lineage_nodes', {'dataset_id': ds, 'field_name': row.target_field},
+                           {'node_type': 'Derived Field' if row.target_field in derived else 'Source Field'},
+                           'node')
+            desired_nodes.add(target)
+            for rel in group.itertuples():
+                edge_values = {k: (getattr(rel, k) or None) for k in [
+                    'source_mapping_label', 'source_transformation',
+                    'source_verification_status', 'source_evidence_ref', 'source_verified_at']}
+                if rel.source_kind == 'Internal':
+                    source_ds, field = ds, rel.source_ref
+                    kind = 'Derived Field' if field in derived else 'Source Field'
                 else:
-                    result = conn.execute(
-                        text(
-                            """
-                            INSERT INTO transformation_rules
-                                (rule_name, target_dataset_id, target_field, transformation_type,
-                                 transformation_logic, business_justification, created_by)
-                            VALUES
-                                (:rule_name, :target_dataset_id, :target_field, :ttype,
-                                 :logic, :justification, :created_by)
-                            """
-                        ),
-                        {
-                            "rule_name": rule_name,
-                            "target_dataset_id": target_dataset_id,
-                            "target_field": row["target_field"],
-                            "ttype": row["transformation_type"],
-                            "logic": row["transformation_logic"],
-                            "justification": row["business_justification"],
-                            "created_by": row["created_by"],
-                        },
-                    )
-                    rule_id_cache[rule_name] = result.lastrowid
+                    feed_name = f'{rel.source_ref} / {rel.source_dataset}'
+                    source_ds = conn.execute(text('SELECT dataset_id FROM datasets WHERE dataset_name=:name'),
+                                             {'name': feed_name}).scalar()
+                    if source_ds is None:
+                        source_ds = conn.execute(text('''INSERT INTO datasets(dataset_name,physical_table_name,
+                                description,business_owner)
+                            VALUES (:name,'EXTERNAL_FEED',:description,'Unassigned upstream owner')'''),
+                            {'name': feed_name,
+                             'description': 'Illustrative external source boundary registered from '
+                                            'transformation_rules.csv; not a connected vendor feed.'}).lastrowid
+                    field, kind = rel.source_field, 'External Feed'
+                source = upsert(conn, 'lineage_nodes', {'dataset_id': source_ds, 'field_name': field},
+                               {'node_type': kind}, 'node')
+                desired_nodes.add(source)
+                link = upsert(conn, 'lineage_edges',
+                             {'source_node_id': source, 'target_node_id': target},
+                             {**edge_values, 'rule_id': rule}, 'edge')
+                desired_edges.add(link)
 
-            rule_id = rule_id_cache[rule_name]
+        # Retire only relationships/rules owned by this dataset.
+        old_edges = conn.execute(text('''SELECT e.* FROM lineage_edges e JOIN transformation_rules r
+            ON r.rule_id=e.rule_id WHERE r.target_dataset_id=:ds AND e.is_active=1'''),
+            {'ds': ds}).mappings().all()
+        old_rules = conn.execute(text('SELECT * FROM transformation_rules WHERE target_dataset_id=:ds AND is_active=1'),
+                                 {'ds': ds}).mappings().all()
+        for table, pk, kind, rows, wanted in [('lineage_edges', 'edge_id', 'edge', old_edges, desired_edges),
+                                              ('transformation_rules', 'rule_id', 'rule', old_rules, desired_rules)]:
+            for old in rows:
+                if old[pk] not in wanted:
+                    conn.execute(text(f'UPDATE {table} SET is_active=0 WHERE {pk}=:key'), {'key': old[pk]})
+                    audit(conn, kind, old[pk], 'retire', dict(old), {**dict(old), 'is_active': 0})
 
-            # 2. Resolve/create the target node.
-            target_node_type = "Derived Field" if row["target_field"] in derived_fields else "Source Field"
-            target_node_id = _get_or_create_node(
-                conn, target_dataset_id, row["target_field"], target_node_type
-            )
+        # Nodes disconnected by this snapshot remain stored for history, but leave current graph.
+        for old in conn.execute(text('SELECT * FROM lineage_nodes WHERE is_active=1')).mappings().all():
+            used = conn.execute(text('''SELECT 1 FROM lineage_edges WHERE is_active=1
+                AND (source_node_id=:key OR target_node_id=:key)'''), {'key': old['node_id']}).first()
+            if not used and old['node_id'] not in desired_nodes:
+                conn.execute(text('UPDATE lineage_nodes SET is_active=0 WHERE node_id=:key'), {'key': old['node_id']})
+                audit(conn, 'node', old['node_id'], 'retire', dict(old), {**dict(old), 'is_active': 0})
 
-            # 3. Resolve/create the source node.
-            if row["source_kind"] == "External":
-                source_dataset_id = _get_or_create_dataset(conn, row["source_ref"], is_external=True)
-                source_node_id = _get_or_create_node(
-                    conn, source_dataset_id, row["source_ref"], "External Feed"
-                )
-            else:  # Internal -- source_ref is another field within the same datamart
-                source_node_type = "Derived Field" if row["source_ref"] in derived_fields else "Source Field"
-                source_node_id = _get_or_create_node(
-                    conn, target_dataset_id, row["source_ref"], source_node_type
-                )
-
-            # 4. Create the edge (idempotent thanks to uq_edge on the table).
-            existing_edge = conn.execute(
-                text(
-                    "SELECT edge_id FROM lineage_edges WHERE source_node_id = :s AND target_node_id = :t"
-                ),
-                {"s": source_node_id, "t": target_node_id},
-            ).fetchone()
-            if existing_edge:
-                continue
-
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO lineage_edges (source_node_id, target_node_id, rule_id)
-                    VALUES (:source_node_id, :target_node_id, :rule_id)
-                    """
-                ),
-                {"source_node_id": source_node_id, "target_node_id": target_node_id, "rule_id": rule_id},
-            )
-            edges_created += 1
-
-        print(f"[transformation_rules] loaded {len(rule_id_cache)} unique rules")
-        print(f"[lineage_edges] created {edges_created} edges")
+        from lineage.build_graph import build_graph, validate_dag
+        # Same transaction: a cycle rolls back every change.
+        validate_dag(build_graph(conn))
+    print(f'[lineage] reconciled {len(desired_rules)} active rules and {len(desired_edges)} edges')
 
 
-if __name__ == "__main__":
-    engine = get_engine()
-    load(engine)
+if __name__ == '__main__':
+    from config.db_config import get_engine
+    load(get_engine())

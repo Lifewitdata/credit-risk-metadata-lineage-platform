@@ -31,7 +31,7 @@ Every calculated field, traced back to its original source system. This is the
 **Full upstream trace** ({{ derived.upstream|length }} ancestors):
 
 ```
-{% for a in derived.upstream %}{{ "  " * a.depth }}└─ [{{ a.node_type }}] {{ a.field_name }}
+{% for a in derived.upstream %}{{ "  " * a.depth }}└─ [{{ a.node_type }}] {{ a.trace_label }}
 {% endfor %}```
 
 ---
@@ -48,10 +48,48 @@ definition or values changed. Use this before approving any change to a source f
 | `{{ src.field_name }}` | {{ src.downstream_list }} |
 {% endfor %}
 
+## Source Field Register — External Feeds
+
+Every edge that crosses the platform boundary, resolved to a named source dataset
+and field rather than a vendor name alone. Rows labelled `illustrative` are
+readable stand-ins chosen so the graph is complete; **no vendor field
+specification is on file for them**, so they are stored as draft with no evidence
+reference and no verification date, and the loader refuses to mark them confirmed.
+Promoting one requires editing `data/raw/transformation_rules.csv` to label it
+`vendor-spec` and cite the specification and review date.
+
+| Source field | Source dataset (feed) | Target field | Rule | Transformation applied | Mapping | Verification | Evidence | Verified on |
+|---|---|---|---|---|---|---|---|---|
+{% for m in external_mappings -%}
+| `{{ m.source_field }}` | {{ m.source_dataset }} | `{{ m.target_field }}` | `{{ m.rule_name }}` | {{ m.source_transformation }} | {{ m.source_mapping_label }} | {{ m.source_verification_status }} | {{ m.source_evidence_ref or 'none on file' }} | {{ m.source_verified_at or '—' }} |
+{% endfor %}
+
+## Source Field Register — Internal Derivations
+
+Inputs inside the governed dataset. These are checked by the loader against the
+latest `physical_schema_snapshot` scan on every run, so an input that stops
+existing fails the load instead of quietly disappearing from the graph.
+
+| Source field | Target field | Rule | Transformation applied | Verification | Evidence | Verified on |
+|---|---|---|---|---|---|---|
+{% for m in internal_mappings -%}
+| `{{ m.source_field }}` | `{{ m.target_field }}` | `{{ m.rule_name }}` | {{ m.source_transformation }} | {{ m.source_verification_status }} | {{ m.source_evidence_ref or 'none on file' }} | {{ m.source_verified_at or '—' }} |
+{% endfor %}
+
 ## Full Transformation Rule Registry
 
 | Rule | Type | Target Field | Logic | Owner |
 |---|---|---|---|---|
 {% for rule in all_rules -%}
 | `{{ rule.rule_name }}` | {{ rule.transformation_type }} | `{{ rule.target_field }}` | {{ rule.transformation_logic }} | {{ rule.created_by }} |
+{% endfor %}
+
+## Verification
+
+External mappings are illustrative until their source specifications are reviewed.
+
+| Rule | Verification | Evidence |
+|---|---|---|
+{% for rule in all_rules %}
+| {{ rule.rule_name }} | {{ rule.verification_status }} | {{ rule.evidence_ref or "Unconfirmed" }} |
 {% endfor %}
