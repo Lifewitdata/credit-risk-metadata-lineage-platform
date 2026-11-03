@@ -38,9 +38,34 @@ The reconciliation ran against the committed ten-row fixture: seven mismatches, 
 blocked inputs, zero passes. This is a finding to investigate, not a failed attempt to
 make the data look clean.
 
+## GitHub Actions result for the pushed state
+
+Actions ran `9e539a2` on 2026-10-31 (both the `push` and `pull_request` events) on
+Ubuntu with Python 3.12 against a `mysql:8.0` service:
+
+- `tests/test_catalog.py`: 21 passed.
+- `tests/test_mysql.py`: 1 failed, 5 passed in 1h 17m 56s.
+
+The failure was `test_committed_documentation_matches_the_database` comparing the
+committed `docs/lineage_graph.png` byte-for-byte with the one the runner
+regenerated. It is not a version difference: pip resolved matplotlib 3.11.2, the
+same version recorded in the committed PNG's `Software` text chunk, and the
+markdown reports and interactive HTML matched exactly. Only the raster differed,
+so the assertion held on the machine that rendered the image and could never hold
+on another platform. The image is now checked for stability by rendering the
+current graph twice in the same run, and graph structure stays covered by the
+interactive HTML, which embeds every node and edge.
+
 ## Not yet claimed
 
-GitHub Actions has not run the commits above; the workflow changed only by dropping a
-now-redundant manual `cryptography` install. Check the actual run before saying CI is
-green for this state. SQLite regression tests are not proof of MySQL behaviour, and
-the generated reports are portfolio fixtures, not evidence about a real vendor feed.
+The change above has not been executed against MySQL, so CI still has to confirm
+it. The 6-passing-1-failing result came from a Windows runner environment; nothing
+here proves the same on Ubuntu. SQLite regression tests are not proof of MySQL
+behaviour, and the generated reports are portfolio fixtures, not evidence about a
+real vendor feed.
+
+Two things worth a separate decision. The integration job spends most of its wall
+clock in three full `main.py` subprocess runs. And `generate_docs.py` orders
+relationships by `sn.node_type DESC`, which sorts by ENUM index on MySQL but
+alphabetically on the SQLite fixtures, so the catalog tests exercise a different
+order from production.

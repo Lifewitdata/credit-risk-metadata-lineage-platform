@@ -36,24 +36,47 @@ def engine():
     e.dispose()
 
 
+def _committed(name):
+    return subprocess.run(['git', 'show', f'HEAD:{name}'], cwd=ROOT, check=True,
+                          capture_output=True).stdout
+
+
 def test_committed_documentation_matches_the_database(engine):
     """Generated docs are committed, so they can silently disagree with the code.
 
     Regenerate and compare byte-for-byte, ignoring only the run timestamp in the
-    markdown reports. The rendered graph carries no timestamp, so an ordering
-    change anywhere in the pipeline shows up as a different image.
+    markdown reports. Text output is reproducible everywhere. The PNG is not: the
+    committed pixels only match the machine that rendered them, because the
+    rasterizer behind the text labels is built per platform even when the
+    matplotlib version is identical. The image is checked for stability in the
+    next test instead, and its structure is still covered here because the
+    interactive HTML embeds every node and edge.
     """
     run_pipeline()
     for name in ['docs/data_dictionary.md', 'docs/lineage_report.md']:
-        committed = subprocess.run(['git', 'show', f'HEAD:{name}'], cwd=ROOT, check=True,
-                                   capture_output=True).stdout
-        generated = (ROOT / name).read_bytes()
-        assert GEN_TIMESTAMP.sub(b'> **Auto-generated** on <timestamp>', committed) == \
-               GEN_TIMESTAMP.sub(b'> **Auto-generated** on <timestamp>', generated), name
-    for name in ['docs/lineage_graph.png', 'docs/lineage_graph_interactive.html']:
-        committed = subprocess.run(['git', 'show', f'HEAD:{name}'], cwd=ROOT, check=True,
-                                   capture_output=True).stdout
-        assert committed == (ROOT / name).read_bytes(), name
+        assert GEN_TIMESTAMP.sub(b'> **Auto-generated** on <timestamp>', _committed(name)) == \
+               GEN_TIMESTAMP.sub(b'> **Auto-generated** on <timestamp>',
+                                 (ROOT / name).read_bytes()), name
+    assert _committed('docs/lineage_graph_interactive.html') == \
+           (ROOT / 'docs' / 'lineage_graph_interactive.html').read_bytes()
+
+
+def test_rendered_graph_is_byte_stable_here(engine, tmp_path):
+    """Two renders of the current graph must be identical to this run's output.
+
+    This is the ordering guard that the committed-image check was standing in
+    for: node order inside a layout layer used to come from nx.utils.groups,
+    which returns sets, so the image followed the interpreter's hash seed.
+    """
+    from lineage.build_graph import build_graph
+    from lineage.visualize import plot_static
+
+    graph = build_graph(engine)
+    first, second = tmp_path / 'first.png', tmp_path / 'second.png'
+    plot_static(graph, first)
+    plot_static(graph, second)
+    assert first.read_bytes() == second.read_bytes() == \
+           (ROOT / 'docs' / 'lineage_graph.png').read_bytes()
 
 
 def test_committed_calculation_report_matches_the_fixture(engine):
