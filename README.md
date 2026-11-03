@@ -25,7 +25,11 @@ usage permissions remain explicitly unconfirmed.
 - [Calculation reconciliation](reports/calculation_validation.csv): seven mismatches and three blocked inputs in the supplied fixture; no source values overwritten.
 - [Source field register](docs/lineage_report.md): every input relationship with its source dataset, source field, transformation note, mapping label and verification state.
 - [Investigation and recommended action](docs/investigation.md).
-- [Catalog operations and verification workflow](docs/operations.md).
+- [Catalog operations and verification workflow](docs/operations.md), including how to read
+  the null and freshness report.
+- [Column-by-column extract spec](docs/extract_spec.md) and the [intake and triage register](docs/intake_triage.md)
+  the requests arrive through.
+- [AI-assisted mapping log](docs/ai_mapping_log.md): what a model drafted, what was refused and why.
 - [Rule snapshot with evidence/status columns](data/raw/transformation_rules.csv).
 - [Vendor usage register seed](data/raw/vendor_usage.csv).
 - [Validation record](docs/validation.md).
