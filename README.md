@@ -23,6 +23,7 @@ usage permissions remain explicitly unconfirmed.
 ## Review the work
 
 - [Calculation reconciliation](reports/calculation_validation.csv): seven mismatches and three blocked inputs in the supplied fixture; no source values overwritten.
+- [Same reconciliation as a workbook](reports/calculation_validation.xlsx): `Validation`, a formula `Summary`, a `Reconciliation` tab using XLOOKUP, and the `Dictionary` the definition comes from.
 - [Source field register](docs/lineage_report.md): every input relationship with its source dataset, source field, transformation note, mapping label and verification state.
 - [Investigation and recommended action](docs/investigation.md).
 - [Catalog operations and verification workflow](docs/operations.md), including how to read
@@ -35,12 +36,14 @@ usage permissions remain explicitly unconfirmed.
 - [Validation record](docs/validation.md).
 
 The pipeline generates `docs/data_dictionary.md`, `docs/lineage_report.md`, lineage
-visualizations and `reports/local/` CSV extracts from MySQL. The generated reports
+visualizations, `reports/calculation_validation.xlsx` and `reports/local/` CSV extracts
+from MySQL. The generated reports
 are committed, and the MySQL integration test regenerates them and compares the
 result byte-for-byte (apart from the run timestamp in the two markdown headers), so
 a committed report cannot quietly disagree with the code that produced it. The
 interactive HTML graph is compared the same way and embeds every node and edge, so a
-lineage change still fails the suite. The PNG is instead rendered twice within one run
+lineage change still fails the suite, and the workbook is compared cell by cell since
+its zip entry carries the write time. The PNG is instead rendered twice within one run
 and required to agree with itself: raster output only ever matches the machine that
 drew it, and asserting otherwise made the suite pass on one laptop and fail on Linux.
 The CI artifact `catalog-validation-evidence` contains outputs from a disposable MySQL
@@ -60,8 +63,9 @@ run, including `reports/local/data_quality.csv`.
 | Issue queue | Ownership, next action, status and closure evidence; schema findings reopen if they recur; an open issue blocks confirming a rule on that field |
 | Vendor records | Dataset scope, use restrictions, customer display, redistribution, review/renewal dates and open questions |
 | Calculation QA | Independent loan/revenue reconciliation; missing/zero denominators remain blocked |
+| Excel deliverable | The reconciliation as a four-tab workbook whose expected ratio, counts and maximum drift are live formulas; compared cell by cell because a zip entry cannot be compared byte for byte |
 | Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed |
-| Tests | 25 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
+| Tests | 27 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
 
 Schema conformity and verification are separate: a correctly typed field can
 still have an unconfirmed business definition. The scorecard's coverage metric

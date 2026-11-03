@@ -25,7 +25,7 @@ from etl import load_raw
 from sql.validation import run_validation
 from lineage import load_transformation_rules, build_graph, visualize
 from docs import generate_docs
-from metadata import governance, calculation_validation, data_quality
+from metadata import governance, calculation_validation, data_quality, excel_report
 from metadata.dictionary_service import apply_demo_revision
 
 
@@ -95,6 +95,7 @@ def main():
         governance.sync_schema_issues(engine)
         run_data_quality(engine)
         calculation_validation.run()
+        excel_report.run()
         run_lineage_load(engine)
         run_docs(engine)
         run_visualization(engine)
@@ -112,6 +113,7 @@ def main():
     print("  docs/lineage_report.md")
     print("  docs/lineage_graph.png")
     print("  docs/lineage_graph_interactive.html")
+    print("  reports/calculation_validation.xlsx")
 
 
 if __name__ == "__main__":

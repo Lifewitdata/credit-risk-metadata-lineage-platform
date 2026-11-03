@@ -312,6 +312,47 @@ def test_a_schema_scan_name_that_is_not_an_identifier_is_refused():
             _quote(hostile)
 
 
+def cells(workbook, name):
+    return [[cell.value for cell in row] for row in workbook[name].iter_rows()]
+
+
+def test_committed_workbook_matches_the_code_that_writes_it():
+    """The workbook cannot be byte-compared like the markdown reports: a zip entry
+    carries its write time. So the committed file must agree cell for cell with a
+    workbook built from the committed CSV right now."""
+    from openpyxl import load_workbook
+    from metadata.excel_report import (DICTIONARY_CSV, OUTPUT, VALIDATION_CSV, build)
+
+    fresh = build(pd.read_csv(VALIDATION_CSV),
+                  pd.read_csv(DICTIONARY_CSV, keep_default_na=False))
+    committed = load_workbook(OUTPUT)
+    assert committed.sheetnames == fresh.sheetnames == [
+        'Validation', 'Summary', 'Reconciliation', 'Dictionary']
+    for name in fresh.sheetnames:
+        assert cells(committed, name) == cells(fresh, name), name
+
+
+def test_workbook_keeps_the_ratio_as_a_formula_and_the_verdict_as_data():
+    from openpyxl import load_workbook
+    from metadata.excel_report import DICTIONARY_CSV, OUTPUT, VALIDATION_CSV, build
+
+    for source in (load_workbook(OUTPUT),
+                   build(pd.read_csv(VALIDATION_CSV),
+                         pd.read_csv(DICTIONARY_CSV, keep_default_na=False))):
+        rows = cells(source, 'Validation')[1:]
+        assert len(rows) == 10
+        blocked = [r for r in rows if r[8] == 'blocked_input']
+        assert len(blocked) == 3
+        assert blocked[0][2] is None or blocked[0][2] == 0      # missing or zero revenue
+        assert all(r[4].startswith('=IF(AND(ISNUMBER(') for r in rows)   # not pasted numbers
+        assert all(r[8] in ('mismatch', 'blocked_input') for r in rows)  # 7 + 3, no pass
+        recon = cells(source, 'Reconciliation')[1]
+        assert recon[1].startswith('=_xlfn.XLOOKUP(A2,Validation!')
+        assert recon[4].endswith('Dictionary!$C$2:$C$12,"undocumented")')
+        summary = cells(source, 'Summary')[1]
+        assert summary[1] == '=COUNTIF(Validation!$I$2:$I$11,"pass")'
+
+
 def test_confirmation_requires_evidence(db):
     with pytest.raises(ValueError, match='evidence'):
         set_verification(db, 1, 'score', 'confirmed')

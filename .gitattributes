@@ -1,5 +1,8 @@
-# Generated docs and reports are compared byte-for-byte by tests/test_catalog.py,
-# so checkout must never rewrite line endings per platform.
+# Generated docs and reports are compared byte-for-byte by the MySQL integration
+# suite, so checkout must never rewrite line endings per platform.
 * text=auto eol=lf
 *.png binary
 *.html text eol=lf
+
+# Spreadsheets are zipped binaries; never let text=auto touch them.
+*.xlsx binary
