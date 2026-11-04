@@ -32,12 +32,30 @@ usage permissions remain explicitly unconfirmed.
   the requests arrive through.
 - [AI-assisted mapping log](docs/ai_mapping_log.md): what a model drafted, what was refused and why.
 - [Support runbook](docs/support_runbook.md): "why hasn't the closing price updated?" — the freshness query, the holiday rows, and what each verdict means.
+- [Governance dashboard](docs/dashboard.md): the BI extract, the rendered preview below, and the connection steps for Power BI, Looker Studio and Tableau.
 - [Rule snapshot with evidence/status columns](data/raw/transformation_rules.csv).
 - [Vendor usage register seed](data/raw/vendor_usage.csv).
 - [Validation record](docs/validation.md).
 
+## The dashboard
+
+![Governance scorecard and issue queue, rendered from reports/governance_dashboard.csv](docs/governance_dashboard.png)
+
+The pipeline draws that image itself. The part a BI tool consumes is
+[reports/governance_dashboard.csv](reports/governance_dashboard.csv) — one long table
+of `section, subject, metric, value` carrying the scorecard, the verification counts,
+the issue queue and the vendor register — and
+[docs/dashboard.md](docs/dashboard.md) is the connection and layout spec. There is no
+hosted Power BI, Looker or Tableau asset for this project because there is no account
+to publish one to; a screenshot of a service nobody can reproduce would be a claim,
+not an artifact. The extract and the preview are checkable instead: the CSV is compared
+byte-for-byte against what the current catalog regenerates, and the PNG must render
+identically twice in one run.
+
 The pipeline generates `docs/data_dictionary.md`, `docs/lineage_report.md`, lineage
-visualizations, `reports/calculation_validation.xlsx` and `reports/local/` CSV extracts
+visualizations, `reports/calculation_validation.xlsx`, the dashboard extract and
+preview (`reports/governance_dashboard.csv`, `docs/governance_dashboard.png`) and
+`reports/local/` CSV extracts
 from MySQL. The generated reports
 are committed, and the MySQL integration test regenerates them and compares the
 result byte-for-byte (apart from the run timestamp in the two markdown headers), so
@@ -68,7 +86,8 @@ run, including `reports/local/data_quality.csv`.
 | Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed. A `Daily` cadence is tolerated in weekdays, because a Friday close read on the Tuesday is not four days late |
 | External onboarding | `python -m etl.load_market_prices` registers a second dataset (daily closing prices from a public source) through the same source-system, registry, dictionary, vendor and schema-scan steps as the governed datamart. Run by hand, never from the pipeline, and no market data is committed: its redistribution right is unconfirmed |
 | Scale evidence | The data-quality pass measured on 1,000 rows x 100 synthetic fields: one aggregate query per dataset regardless of width. A never-populated column and a late file are reported; the seeded duplicate key is asserted to be a gap, because nothing in this project checks uniqueness. Wall clock is reported, not asserted, and no other loader is scale-tested |
-| Tests | 34 SQLite regression tests plus 7 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
+| Dashboard | The scorecard, verification counts, issue queue and vendor register as one long-format BI extract, plus a preview rendered in the same pipeline run and a connection spec for Power BI, Looker Studio and Tableau. No hosted BI asset is claimed: publishing needs an account this project does not have |
+| Tests | 34 SQLite regression tests plus 9 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
 
 Schema conformity and verification are separate: a correctly typed field can
 still have an unconfirmed business definition. The scorecard's coverage metric

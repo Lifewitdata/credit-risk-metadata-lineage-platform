@@ -200,6 +200,17 @@ scoped to the governed dataset by name, because they previously counted rows and
 would fail on any database where a second dataset or vendor had been onboarded —
 including one where someone followed this runbook.
 
+## Governance dashboard extract
+
+`reports/governance_dashboard.csv` (52 rows: 6 scorecard, 4 verification, 24 issue,
+18 vendor) and `docs/governance_dashboard.png` were generated on 2026-11-03 from a
+newly created MySQL 8.0 schema after `scripts/setup_database.py` and one `main.py`
+run, which is the only state the committed reports are meant to describe. Two
+integration tests guard them: the CSV is byte-compared against HEAD, and the PNG is
+rendered twice and must equal itself and the committed file. No Power BI, Looker
+Studio or Tableau asset was built or published; [dashboard.md](dashboard.md) is the
+connection spec, not evidence that one exists.
+
 ## Not yet claimed
 
 SQLite regression tests are not proof of MySQL behaviour, and the generated reports

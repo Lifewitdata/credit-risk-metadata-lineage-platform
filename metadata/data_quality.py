@@ -29,7 +29,11 @@ IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # weekdays: a Friday snapshot read on the Tuesday is two days late and nothing
 # like a stale feed. Weekly and monthly extracts are calendar-dated, so a
 # weekend is part of their interval and they are counted in calendar days.
-CADENCE_TOLERANCE = {"daily": (2, "weekdays"), "weekly": (9, "days"), "monthly": (33, "days")}
+CADENCE_TOLERANCE = {
+    "daily": (2, "weekdays"),
+    "weekly": (9, "days"),
+    "monthly": (33, "days"),
+}
 
 COLUMNS = ["dataset_name", "check", "subject", "value", "expected", "status"]
 

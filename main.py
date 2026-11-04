@@ -25,7 +25,13 @@ from etl import load_raw
 from sql.validation import run_validation
 from lineage import load_transformation_rules, build_graph, visualize
 from docs import generate_docs
-from metadata import governance, calculation_validation, data_quality, excel_report
+from metadata import (
+    governance,
+    calculation_validation,
+    dashboard,
+    data_quality,
+    excel_report,
+)
 from metadata.dictionary_service import apply_demo_revision
 
 
@@ -72,7 +78,7 @@ def run_docs(engine):
     generate_docs.generate_lineage_doc(engine)
 
 
-@step("6/6  Visualization: static PNG + interactive HTML lineage graphs")
+@step("6/6  Visualization: lineage graphs and the governance dashboard extract")
 def run_visualization(engine):
     graph = build_graph.build_graph(engine)
     build_graph.validate_dag(graph)  # hard stop if lineage isn't a valid DAG
@@ -80,6 +86,7 @@ def run_visualization(engine):
     docs_dir.mkdir(exist_ok=True)
     visualize.plot_static(graph, docs_dir / "lineage_graph.png")
     visualize.plot_interactive(graph, docs_dir / "lineage_graph_interactive.html")
+    dashboard.run(engine)
 
 
 def main():
@@ -114,6 +121,8 @@ def main():
     print("  docs/lineage_graph.png")
     print("  docs/lineage_graph_interactive.html")
     print("  reports/calculation_validation.xlsx")
+    print("  reports/governance_dashboard.csv")
+    print("  docs/governance_dashboard.png")
 
 
 if __name__ == "__main__":

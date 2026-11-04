@@ -38,4 +38,5 @@ jobs:
             docs/lineage_report.md
             docs/lineage_graph.png
             docs/lineage_graph_interactive.html
+            docs/governance_dashboard.png
             reports/

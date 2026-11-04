@@ -86,6 +86,28 @@ def test_committed_calculation_report_matches_the_fixture(engine):
     assert (ROOT / 'reports' / 'calculation_validation.csv').read_bytes() == committed
 
 
+def test_committed_dashboard_extract_matches_the_catalog(engine):
+    """The BI extract is the source a hosted dashboard would read, so it is
+    committed and compared like the other reports. It carries no timestamps for
+    exactly this reason; queue timing stays in gitignored reports/local/."""
+    committed = subprocess.run(['git', 'show', 'HEAD:reports/governance_dashboard.csv'],
+                               cwd=ROOT, check=True, capture_output=True).stdout
+    assert (ROOT / 'reports' / 'governance_dashboard.csv').read_bytes() == committed
+
+
+def test_rendered_dashboard_is_byte_stable_here(engine, tmp_path):
+    """Two renders of the extract must be identical, like the lineage PNG: the
+    committed pixels only ever match the machine that drew them."""
+    from metadata.dashboard import extract, render
+
+    frame = extract(engine)
+    first, second = tmp_path / 'first.png', tmp_path / 'second.png'
+    render(frame, first)
+    render(frame, second)
+    assert first.read_bytes() == second.read_bytes() == \
+           (ROOT / 'docs' / 'governance_dashboard.png').read_bytes()
+
+
 def test_external_relationship_evidence_survives_a_mysql_round_trip(engine):
     with engine.connect() as c:
         rows = c.execute(text("""
