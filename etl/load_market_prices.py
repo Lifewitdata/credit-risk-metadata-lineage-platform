@@ -23,6 +23,7 @@ reachable on 2026-11-03; that is a fact about that day, not a service guarantee.
 import csv
 import io
 import json
+import math
 import sys
 import urllib.request
 from datetime import date, datetime
@@ -99,21 +100,31 @@ def parse(body):
     """
     reader = csv.reader(io.StringIO(body))
     header = next(reader, None)
-    if not header or [column.strip().lower() for column in header[:2]] != ["observation_date",
+    if not header or len(header) != 2 or [column.strip().lower() for column in header] != ["observation_date",
                                                                            SERIES_ID.lower()]:
         raise ValueError(f"unexpected header {header!r}; the source changed shape")
     rows = []
+    seen = set()
     for line in reader:
         if not line or not any(column.strip() for column in line):
             continue                                   # blank separator line
-        if len(line) < 2:
+        if len(line) != 2:
             raise ValueError(f"unexpected row {line!r}; the source changed shape")
         value = line[1].strip()
-        rows.append((date.fromisoformat(line[0].strip()),
-                     None if value in ("", ".", "NA") else float(value)))
+        day = date.fromisoformat(line[0].strip())
+        if day in seen:
+            raise ValueError(f"duplicate trading date {day}; refusing ambiguous source data")
+        seen.add(day)
+        close = None if value in ("", ".", "NA") else float(value)
+        if close is not None and (not math.isfinite(close) or close <= 0):
+            raise ValueError(f"invalid close_value on {day}: expected a finite positive index level")
+        rows.append((day, close))
     if not rows:
         raise ValueError("the download contained no observations")
-    return rows
+    if not any(value is not None for _, value in rows):
+        raise ValueError("the download contained no priced observations; retaining the previous dataset")
+    # Provenance first/last dates must not depend on the provider's row order.
+    return sorted(rows, key=lambda row: row[0])
 
 
 def to_frame(rows, retrieved_at):
