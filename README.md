@@ -1,5 +1,15 @@
 # Credit Risk Metadata & Lineage Platform
 
+![Catalog regression and MySQL integration](https://github.com/Lifewitdata/credit-risk-metadata-lineage-platform/actions/workflows/tests.yml/badge.svg?branch=main)
+
+## Start here
+
+This is a catalogue of a small business-loan dataset. It records what each column
+means, where every figure came from, and which answers we still do not have.
+[docs/investigation.md](docs/investigation.md) shows the point: a ratio we publish
+disagrees with its own written formula, and it is left visible for review rather
+than quietly corrected.
+
 A hands-on Python/MySQL portfolio project for catalog maintenance, field lineage,
 calculation reconciliation and governance issue tracking. It answers **where a
 field comes from, whether its definition matches the database, what is verified,
@@ -13,21 +23,50 @@ usage permissions remain explicitly unconfirmed.
 ## Review the work
 
 - [Calculation reconciliation](reports/calculation_validation.csv): seven mismatches and three blocked inputs in the supplied fixture; no source values overwritten.
+- [Same reconciliation as a workbook](reports/calculation_validation.xlsx): `Validation`, a formula `Summary`, a `Reconciliation` tab using XLOOKUP, and the `Dictionary` the definition comes from.
 - [Source field register](docs/lineage_report.md): every input relationship with its source dataset, source field, transformation note, mapping label and verification state.
 - [Investigation and recommended action](docs/investigation.md).
-- [Catalog operations and verification workflow](docs/operations.md).
+- [Catalog operations and verification workflow](docs/operations.md), including how to read
+  the null and freshness report.
+- [Column-by-column extract spec](docs/extract_spec.md) and the [intake and triage register](docs/intake_triage.md)
+  the requests arrive through.
+- [AI-assisted mapping log](docs/ai_mapping_log.md): what a model drafted, what was refused and why.
+- [Support runbook](docs/support_runbook.md): "why hasn't the closing price updated?" — the freshness query, the holiday rows, and what each verdict means.
+- [Governance dashboard](docs/dashboard.md): the BI extract, the rendered preview below, and the connection steps for Power BI, Looker Studio and Tableau.
 - [Rule snapshot with evidence/status columns](data/raw/transformation_rules.csv).
 - [Vendor usage register seed](data/raw/vendor_usage.csv).
 - [Validation record](docs/validation.md).
 
+## The dashboard
+
+![Governance scorecard and issue queue, rendered from reports/governance_dashboard.csv](docs/governance_dashboard.png)
+
+The pipeline draws that image itself. The part a BI tool consumes is
+[reports/governance_dashboard.csv](reports/governance_dashboard.csv) — one long table
+of `section, subject, metric, value` carrying the scorecard, the verification counts,
+the issue queue and the vendor register — and
+[docs/dashboard.md](docs/dashboard.md) is the connection and layout spec. There is no
+hosted Power BI, Looker or Tableau asset for this project because there is no account
+to publish one to; a screenshot of a service nobody can reproduce would be a claim,
+not an artifact. The extract and the preview are checkable instead: the CSV is compared
+byte-for-byte against what the current catalog regenerates, and the PNG must render
+identically twice in one run.
+
 The pipeline generates `docs/data_dictionary.md`, `docs/lineage_report.md`, lineage
-visualizations and `reports/local/` CSV extracts from MySQL. The generated reports
+visualizations, `reports/calculation_validation.xlsx`, the dashboard extract and
+preview (`reports/governance_dashboard.csv`, `docs/governance_dashboard.png`) and
+`reports/local/` CSV extracts
+from MySQL. The generated reports
 are committed, and the MySQL integration test regenerates them and compares the
 result byte-for-byte (apart from the run timestamp in the two markdown headers), so
 a committed report cannot quietly disagree with the code that produced it. The
-rendered graph is compared too, which is only possible because layout ordering is
-now fixed rather than taken from set iteration. The CI artifact
-`catalog-validation-evidence` contains outputs from a disposable MySQL run.
+interactive HTML graph is compared the same way and embeds every node and edge, so a
+lineage change still fails the suite, and the workbook is compared cell by cell since
+its zip entry carries the write time. The PNG is instead rendered twice within one run
+and required to agree with itself: raster output only ever matches the machine that
+drew it, and asserting otherwise made the suite pass on one laptop and fail on Linux.
+The CI artifact `catalog-validation-evidence` contains outputs from a disposable MySQL
+run, including `reports/local/data_quality.csv`.
 
 ## Implemented controls
 
@@ -43,7 +82,12 @@ now fixed rather than taken from set iteration. The CI artifact
 | Issue queue | Ownership, next action, status and closure evidence; schema findings reopen if they recur; an open issue blocks confirming a rule on that field |
 | Vendor records | Dataset scope, use restrictions, customer display, redistribution, review/renewal dates and open questions |
 | Calculation QA | Independent loan/revenue reconciliation; missing/zero denominators remain blocked |
-| Tests | 21 SQLite regression tests plus a disposable MySQL integration suite covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
+| Excel deliverable | The reconciliation as a four-tab workbook whose expected ratio, counts and maximum drift are live formulas; compared cell by cell because a zip entry cannot be compared byte for byte |
+| Data quality | Null counts for every scanned column and freshness for each documented date field, against the cadence declared in `datasets.refresh_frequency`; an unset cadence is reported as unknown, never guessed. A `Daily` cadence is tolerated in weekdays, because a Friday close read on the Tuesday is not four days late |
+| External onboarding | `python -m etl.load_market_prices` registers a second dataset (daily closing prices from a public source) through the same source-system, registry, dictionary, vendor and schema-scan steps as the governed datamart. Run by hand, never from the pipeline, and no market data is committed: its redistribution right is unconfirmed |
+| Scale evidence | The data-quality pass measured on 1,000 rows x 100 synthetic fields: one aggregate query per dataset regardless of width. A never-populated column and a late file are reported; the seeded duplicate key is asserted to be a gap, because nothing in this project checks uniqueness. Wall clock is reported, not asserted, and no other loader is scale-tested |
+| Dashboard | The scorecard, verification counts, issue queue and vendor register as one long-format BI extract, plus a preview rendered in the same pipeline run and a connection spec for Power BI, Looker Studio and Tableau. No hosted BI asset is claimed: publishing needs an account this project does not have |
+| Tests | 34 SQLite regression tests plus 9 MySQL integration tests covering fresh setup, upgrade, concurrent edits, audit triggers, issue closure and report consistency |
 
 Schema conformity and verification are separate: a correctly typed field can
 still have an unconfirmed business definition. The scorecard's coverage metric

@@ -4,9 +4,10 @@ run_validation.py
 Step 3: Execute the dictionary <-> physical schema reconciliation and
 produce a human-readable governance report.
 
-This does NOT duplicate data-quality checks (nulls, drift, duplicates --
-that's a separate project). It answers a metadata-governance question only:
-"does our documentation match reality?"
+This does NOT run data-quality checks. It answers a metadata-governance question
+only: "does our documentation match reality?" Null counts and freshness against the
+declared cadence live in metadata/data_quality.py (step 3 of main.py); duplicate
+detection and value drift are still not covered by this project.
 
 Findings are also written to metadata_audit_log so there is a permanent,
 queryable record of what governance issues were known on which date --

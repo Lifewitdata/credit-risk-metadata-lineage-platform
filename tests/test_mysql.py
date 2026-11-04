@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import pandas as pd
 from sqlalchemy import text
 
 pytestmark = pytest.mark.skipif(os.getenv('CATALOG_TEST_MYSQL') != '1',
@@ -85,6 +86,28 @@ def test_committed_calculation_report_matches_the_fixture(engine):
     assert (ROOT / 'reports' / 'calculation_validation.csv').read_bytes() == committed
 
 
+def test_committed_dashboard_extract_matches_the_catalog(engine):
+    """The BI extract is the source a hosted dashboard would read, so it is
+    committed and compared like the other reports. It carries no timestamps for
+    exactly this reason; queue timing stays in gitignored reports/local/."""
+    committed = subprocess.run(['git', 'show', 'HEAD:reports/governance_dashboard.csv'],
+                               cwd=ROOT, check=True, capture_output=True).stdout
+    assert (ROOT / 'reports' / 'governance_dashboard.csv').read_bytes() == committed
+
+
+def test_rendered_dashboard_is_byte_stable_here(engine, tmp_path):
+    """Two renders of the extract must be identical, like the lineage PNG: the
+    committed pixels only ever match the machine that drew them."""
+    from metadata.dashboard import extract, render
+
+    frame = extract(engine)
+    first, second = tmp_path / 'first.png', tmp_path / 'second.png'
+    render(frame, first)
+    render(frame, second)
+    assert first.read_bytes() == second.read_bytes() == \
+           (ROOT / 'docs' / 'governance_dashboard.png').read_bytes()
+
+
 def test_external_relationship_evidence_survives_a_mysql_round_trip(engine):
     with engine.connect() as c:
         rows = c.execute(text("""
@@ -124,11 +147,20 @@ def test_repeat_pipeline_run_changes_nothing(engine):
 def test_current_version_guard_and_issue_closure(engine):
     from metadata.dictionary_service import update_field_definition, FieldDefinition
     from metadata.governance import sync_schema_issues
+    shipped_vendors = pd.read_csv(ROOT / 'data/raw/vendor_usage.csv',
+                                  keep_default_na=False)['vendor_name'].tolist()
+    assert len(shipped_vendors) == 6
     with engine.connect() as c:
         ds = c.execute(text("SELECT dataset_id FROM datasets WHERE dataset_name='credit_datamart_sme_loans'")).scalar_one()
-        assert c.execute(text('SELECT documentation_coverage_pct FROM vw_governance_scorecard')).scalar_one() == 100
-        assert c.execute(text("SELECT COUNT(*) FROM vendor_usage WHERE customer_display='unconfirmed'")).scalar_one() == 6
-
+        # Scoped to the governed dataset: onboarding a second one through
+        # etl/load_market_prices.py adds a row to the scorecard and to vendor_usage,
+        # and this assertion is about the fixture, not about how many datasets a
+        # given database happens to have.
+        assert c.execute(text("SELECT documentation_coverage_pct FROM vw_governance_scorecard "
+                              "WHERE dataset_name='credit_datamart_sme_loans'")).scalar_one() == 100
+        unconfirmed = set(c.execute(text(
+            "SELECT vendor_name FROM vendor_usage WHERE customer_display='unconfirmed'")).scalars())
+        assert set(shipped_vendors) <= unconfirmed
     def revise(label):
         try:
             update_field_definition(engine, ds, 'loan_id', FieldDefinition(description=label),

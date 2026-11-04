@@ -1,0 +1,53 @@
+section,subject,metric,value
+issues,CALC_RATIO,category,manual_review
+issues,CALC_RATIO,field_name,dti_ratio
+issues,CALC_RATIO,next_action,Review reports/calculation_validation.csv; obtain business definition before changing values.
+issues,CALC_RATIO,owner,Portfolio maintainer
+issues,CALC_RATIO,priority,high
+issues,CALC_RATIO,status,open
+issues,PRICING_GRID,category,manual_review
+issues,PRICING_GRID,field_name,interest_rate
+issues,PRICING_GRID,next_action,Obtain the approved grid and version; keep calculation unverified.
+issues,PRICING_GRID,owner,Portfolio maintainer
+issues,PRICING_GRID,priority,high
+issues,PRICING_GRID,status,open
+issues,SCORE_TIMING,category,manual_review
+issues,SCORE_TIMING,field_name,commercial_credit_score
+issues,SCORE_TIMING,next_action,Resolve observation date versus effective date with the source owner; do not infer a vendor change.
+issues,SCORE_TIMING,owner,Portfolio maintainer
+issues,SCORE_TIMING,priority,high
+issues,SCORE_TIMING,status,open
+issues,SOURCE_EVIDENCE,category,manual_review
+issues,SOURCE_EVIDENCE,field_name,
+issues,SOURCE_EVIDENCE,next_action,Obtain source specifications and agreement evidence; review draft mappings.
+issues,SOURCE_EVIDENCE,owner,Portfolio maintainer
+issues,SOURCE_EVIDENCE,priority,high
+issues,SOURCE_EVIDENCE,status,open
+scorecard,credit_datamart_sme_loans,deprecated_count,0
+scorecard,credit_datamart_sme_loans,documentation_coverage_pct,100.0
+scorecard,credit_datamart_sme_loans,documented_count,11
+scorecard,credit_datamart_sme_loans,total_fields,11
+scorecard,credit_datamart_sme_loans,type_mismatch_count,0
+scorecard,credit_datamart_sme_loans,undocumented_count,0
+vendors,Companies House,customer_display,unconfirmed
+vendors,Companies House,redistribution,unconfirmed
+vendors,Companies House,reviewed,
+vendors,Experian Commercial,customer_display,unconfirmed
+vendors,Experian Commercial,redistribution,unconfirmed
+vendors,Experian Commercial,reviewed,
+vendors,Internal Core Banking,customer_display,unconfirmed
+vendors,Internal Core Banking,redistribution,unconfirmed
+vendors,Internal Core Banking,reviewed,
+vendors,Internal Pricing Engine,customer_display,unconfirmed
+vendors,Internal Pricing Engine,redistribution,unconfirmed
+vendors,Internal Pricing Engine,reviewed,
+vendors,Salesforce,customer_display,unconfirmed
+vendors,Salesforce,redistribution,unconfirmed
+vendors,Salesforce,reviewed,
+vendors,Xero/Quickbooks/Bureau,customer_display,unconfirmed
+vendors,Xero/Quickbooks/Bureau,redistribution,unconfirmed
+vendors,Xero/Quickbooks/Bureau,reviewed,
+verification,field_definition,draft,11
+verification,source_relationship,confirmed,5
+verification,source_relationship,draft,9
+verification,transformation_rule,draft,11

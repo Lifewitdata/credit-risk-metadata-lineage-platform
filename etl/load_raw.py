@@ -207,10 +207,15 @@ def load_physical_table(engine: Engine) -> None:
     # as a design decision worth calling out in an interview.
 
 
-def snapshot_physical_schema(engine: Engine, dataset_id: int) -> None:
+def snapshot_physical_schema(engine: Engine, dataset_id: int,
+                             table: str = PHYSICAL_TABLE_NAME) -> None:
     """Read INFORMATION_SCHEMA.COLUMNS for the physical table and record a
     timestamped snapshot. This is the ground-truth input for Step 3's
-    documented / undocumented / deprecated / new-column reconciliation."""
+    documented / undocumented / deprecated / new-column reconciliation.
+
+    The table is a parameter because a second dataset goes through the same scan;
+    sharing it is what makes "onboard a new asset" one procedure, not two.
+    """
     with engine.begin() as conn:
         db_name = conn.execute(text("SELECT DATABASE()")).scalar()
 
@@ -223,7 +228,7 @@ def snapshot_physical_schema(engine: Engine, dataset_id: int) -> None:
                 ORDER BY ORDINAL_POSITION
                 """
             ),
-            {"schema": db_name, "table": PHYSICAL_TABLE_NAME},
+            {"schema": db_name, "table": table},
         ).fetchall()
 
         scan_id = str(uuid.uuid4())
@@ -240,7 +245,7 @@ def snapshot_physical_schema(engine: Engine, dataset_id: int) -> None:
                 {"dataset_id": dataset_id, "col": col_name, "dtype": data_type, "pos": position, "scan_id": scan_id},
             )
         print(f"[physical_schema_snapshot] recorded {len(columns)} columns "
-              f"for {PHYSICAL_TABLE_NAME}")
+              f"for {table}")
 
 
 def run() -> None:

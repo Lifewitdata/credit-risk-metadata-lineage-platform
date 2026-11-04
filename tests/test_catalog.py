@@ -8,6 +8,7 @@ from lineage.build_graph import build_graph, upstream_lineage
 from metadata.dictionary_service import update_field_definition, FieldDefinition, get_definition_as_of
 from metadata.calculation_validation import validate_ratio
 from metadata.governance import set_verification
+from metadata.data_quality import COLUMNS, evaluate, _quote
 
 GOVERNED = 'credit_datamart_sme_loans'
 
@@ -253,6 +254,124 @@ def test_ratio_checks_preserve_input_and_block_bad_denominators():
     pd.testing.assert_frame_equal(f, before)
 
 
+def load_physical(db, rows):
+    """Create the scanned table, taking its columns from the scan the catalog holds."""
+    with db.begin() as c:
+        columns = [row[0] for row in c.exec_driver_sql(
+            "SELECT column_name FROM vw_latest_schema_snapshot WHERE dataset_id=1"
+            " ORDER BY ordinal_position")]
+        c.exec_driver_sql('CREATE TABLE raw_credit_datamart_sme_loans ('
+                          + ', '.join(f'{column} TEXT' for column in columns) + ')')
+        for row in rows:
+            c.exec_driver_sql(
+                'INSERT INTO raw_credit_datamart_sme_loans VALUES ('
+                + ', '.join('NULL' if value is None else f"'{value}'" for value in row) + ')')
+        c.exec_driver_sql("""INSERT INTO data_dictionary(dataset_id,field_name,data_type,is_current)
+                             VALUES (1,'snapshot_date','date',1)""")
+
+
+def test_data_quality_counts_nulls_and_measures_freshness(db):
+    load_physical(db, [('L1', 'B1', '2024-01-31', 'Retail', None, 100, 620, 20, 0.08, 0.2, 'Current'),
+                       ('L2', 'B2', '2024-02-29', None, 3, 100, 610, 20, 0.09, 0.2, 'Current')])
+    with db.connect() as c:
+        frame = pd.DataFrame(evaluate(c, date(2024, 3, 1)), columns=COLUMNS)
+    status = dict(zip(frame.subject, frame.status))
+    assert status['industry_sector'] == 'review'      # missing on one loan
+    assert status['loan_id'] == 'ok'                  # no nulls anywhere
+    nulls = frame[(frame.check == 'null_count') & (frame.subject == 'industry_sector')]
+    assert nulls.value.item() == 1
+    assert frame[frame.check == 'freshness'].status.item() == 'current'
+    assert frame[frame.check == 'freshness'].value.item() == '2024-02-29'
+    # 2024-02-29 is 92 days before this run date, past the monthly tolerance.
+    with db.connect() as c:
+        stale = evaluate(c, date(2024, 6, 1))
+    assert [r['status'] for r in stale if r['check'] == 'freshness'] == ['stale']
+
+
+def test_freshness_refuses_to_guess_an_undeclared_cadence(db):
+    load_physical(db, [('L1', 'B1', '2024-01-31', 'Retail', 1, 100, 620, 20, 0.08, 0.2, 'Current')])
+    with db.begin() as c:
+        c.exec_driver_sql("UPDATE datasets SET refresh_frequency='Whenever' WHERE dataset_id=1")
+    with db.connect() as c:
+        freshness = [r for r in evaluate(c, date(2024, 3, 1)) if r['check'] == 'freshness']
+    assert freshness[0]['status'] == 'unknown'
+    assert freshness[0]['expected'] == 'cadence Whenever'
+
+
+def test_a_snapshot_dated_after_the_run_is_reviewed_not_current(db):
+    load_physical(db, [('L1', 'B1', '2024-01-31', 'Retail', 1, 100, 620, 20, 0.08, 0.2, 'Current')])
+    with db.connect() as c:
+        freshness = [r for r in evaluate(c, date(2024, 1, 1)) if r['check'] == 'freshness']
+    assert freshness[0]['status'] == 'review'
+    assert freshness[0]['expected'] == 'not dated after the run'
+
+
+def test_a_daily_snapshot_is_not_stale_just_because_of_the_weekend(db):
+    """A Friday close read on the Tuesday is two trading days old, not four days.
+
+    Counting calendar days for a cadence that only publishes on weekdays made the
+    check fire every Monday and Tuesday, which is how an alert stops being read.
+    """
+    load_physical(db, [('L1', 'B1', '2024-03-01', 'Retail', 1, 100, 620, 20, 0.08, 0.2, 'Current')])
+    with db.begin() as c:
+        c.exec_driver_sql("UPDATE datasets SET refresh_frequency='Daily' WHERE dataset_id=1")
+    # 2024-03-01 was a Friday.
+    for as_of, status in [(date(2024, 3, 4), 'current'),   # Monday: 1 trading day
+                          (date(2024, 3, 5), 'current'),   # Tuesday: 2
+                          (date(2024, 3, 6), 'stale')]:    # Wednesday: 3
+        with db.connect() as c:
+            rows = [r for r in evaluate(c, as_of) if r['check'] == 'freshness']
+        assert [r['status'] for r in rows] == [status], as_of
+        assert rows[0]['expected'] == '<= 2 weekdays'
+
+
+def test_a_schema_scan_name_that_is_not_an_identifier_is_refused():
+    for hostile in ['loans; DROP TABLE datasets', 'a`b', '1lead', '']:
+        with pytest.raises(ValueError, match='Unusable identifier'):
+            _quote(hostile)
+
+
+def cells(workbook, name):
+    return [[cell.value for cell in row] for row in workbook[name].iter_rows()]
+
+
+def test_committed_workbook_matches_the_code_that_writes_it():
+    """The workbook cannot be byte-compared like the markdown reports: a zip entry
+    carries its write time. So the committed file must agree cell for cell with a
+    workbook built from the committed CSV right now."""
+    from openpyxl import load_workbook
+    from metadata.excel_report import (DICTIONARY_CSV, OUTPUT, VALIDATION_CSV, build)
+
+    fresh = build(pd.read_csv(VALIDATION_CSV),
+                  pd.read_csv(DICTIONARY_CSV, keep_default_na=False))
+    committed = load_workbook(OUTPUT)
+    assert committed.sheetnames == fresh.sheetnames == [
+        'Validation', 'Summary', 'Reconciliation', 'Dictionary']
+    for name in fresh.sheetnames:
+        assert cells(committed, name) == cells(fresh, name), name
+
+
+def test_workbook_keeps_the_ratio_as_a_formula_and_the_verdict_as_data():
+    from openpyxl import load_workbook
+    from metadata.excel_report import DICTIONARY_CSV, OUTPUT, VALIDATION_CSV, build
+
+    for source in (load_workbook(OUTPUT),
+                   build(pd.read_csv(VALIDATION_CSV),
+                         pd.read_csv(DICTIONARY_CSV, keep_default_na=False))):
+        rows = cells(source, 'Validation')[1:]
+        assert len(rows) == 10
+        blocked = [r for r in rows if r[8] == 'blocked_input']
+        assert len(blocked) == 3
+        assert blocked[0][2] is None or blocked[0][2] == 0      # missing or zero revenue
+        assert all(r[4].startswith('=IF(AND(ISNUMBER(') for r in rows)   # not pasted numbers
+        assert all(r[8] in ('mismatch', 'blocked_input') for r in rows)  # 7 + 3, no pass
+        recon = cells(source, 'Reconciliation')[1]
+        assert recon[1].startswith('=_xlfn.XLOOKUP(A2,Validation!')
+        assert recon[4].endswith('Dictionary!$C$2:$C$12,"undocumented")')
+        summary = cells(source, 'Summary')[1]
+        assert summary[1] == '=COUNTIF(Validation!$I$2:$I$11,"pass")'
+
+
 def test_confirmation_requires_evidence(db):
     with pytest.raises(ValueError, match='evidence'):
         set_verification(db, 1, 'score', 'confirmed')
@@ -271,6 +390,36 @@ def test_import_entrypoint_and_configuration(monkeypatch):
     monkeypatch.setenv('METADATA_DATABASE_URL', 'sqlite:///catalog.db')
     with pytest.raises(ValueError, match='mysql'):
         db_config.get_engine()
+
+
+def test_the_market_loader_reads_the_source_shape_it_claims():
+    """parse() and to_frame() are the only parts of the fetch that can be tested
+    without a network call, so they are where the refusals live."""
+    from etl.load_market_prices import parse, to_frame
+    from datetime import datetime
+
+    body = ('observation_date,SP500\n2024-01-02,.\n2024-01-03,4750.45\n\n')
+    rows = parse(body)
+    assert rows == [(date(2024, 1, 2), None), (date(2024, 1, 3), 4750.45)]
+    frame = to_frame(rows, datetime(2024, 1, 4, 9, 0))
+    assert list(frame.columns) == ['trading_day', 'close_value', 'source_series', 'retrieved_at']
+    assert frame.close_value.isna().sum() == 1        # a missing observation, not a zero
+    with pytest.raises(ValueError, match='changed shape'):
+        parse('observation_date,SP500\n2024-01-03,4750.45\nnot_a_row\n')
+    with pytest.raises(ValueError, match='no observations'):
+        parse('observation_date,SP500\n')
+
+
+def test_the_market_freshness_query_is_one_executable_statement():
+    """The loader runs this file statement by statement, so a stray semicolon in it
+    would be a runtime failure nobody would see until a fetch."""
+    from scripts.setup_database import statements, ROOT
+    commands = [s for s in statements(
+        (ROOT / 'sql/validation/03_market_freshness.sql').read_text(encoding='utf-8'))]
+    assert len(commands) == 1
+    assert commands[0].lstrip().upper().startswith('WITH RECURSIVE')
+    assert 'raw_market_close_prices_daily' in commands[0]
+    assert not any('--' in statement for statement in commands)
 
 
 def test_sql_script_parser_handles_triggers():

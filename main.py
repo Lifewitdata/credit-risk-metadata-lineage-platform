@@ -25,7 +25,13 @@ from etl import load_raw
 from sql.validation import run_validation
 from lineage import load_transformation_rules, build_graph, visualize
 from docs import generate_docs
-from metadata import governance, calculation_validation
+from metadata import (
+    governance,
+    calculation_validation,
+    dashboard,
+    data_quality,
+    excel_report,
+)
 from metadata.dictionary_service import apply_demo_revision
 
 
@@ -37,32 +43,42 @@ def step(name: str):
             result = fn(*args, **kwargs)
             print(f"[{name}] completed in {time.time() - start:.2f}s")
             return result
+
         return wrapper
+
     return decorator
 
 
-@step("1/5  ETL: load raw data into MySQL")
+@step("1/6  ETL: load raw data into MySQL")
 def run_etl():
     load_raw.run()
 
 
-@step("2/5  Governance validation: dictionary <-> physical schema reconciliation")
+@step("2/6  Governance validation: dictionary <-> physical schema reconciliation")
 def run_validation_step():
     return run_validation.run()
 
 
-@step("3/5  Lineage extraction: transformation_rules.csv -> graph tables")
+@step("3/6  Data quality: null counts and freshness against the declared cadence")
+def run_data_quality(engine):
+    frame = data_quality.run(engine)
+    flagged = frame[frame.status != "ok"]
+    print(f"[data_quality] {len(frame)} checks, {len(flagged)} to review")
+    return frame
+
+
+@step("4/6  Lineage extraction: transformation_rules.csv -> graph tables")
 def run_lineage_load(engine):
     load_transformation_rules.load(engine)
 
 
-@step("4/5  Documentation generation: dictionary + lineage markdown reports")
+@step("5/6  Documentation generation: dictionary + lineage markdown reports")
 def run_docs(engine):
     generate_docs.generate_data_dictionary_doc(engine)
     generate_docs.generate_lineage_doc(engine)
 
 
-@step("5/5  Visualization: static PNG + interactive HTML lineage graphs")
+@step("6/6  Visualization: lineage graphs and the governance dashboard extract")
 def run_visualization(engine):
     graph = build_graph.build_graph(engine)
     build_graph.validate_dag(graph)  # hard stop if lineage isn't a valid DAG
@@ -70,6 +86,7 @@ def run_visualization(engine):
     docs_dir.mkdir(exist_ok=True)
     visualize.plot_static(graph, docs_dir / "lineage_graph.png")
     visualize.plot_interactive(graph, docs_dir / "lineage_graph_interactive.html")
+    dashboard.run(engine)
 
 
 def main():
@@ -83,7 +100,9 @@ def main():
         governance.seed_records(engine)
         run_validation_step()
         governance.sync_schema_issues(engine)
+        run_data_quality(engine)
         calculation_validation.run()
+        excel_report.run()
         run_lineage_load(engine)
         run_docs(engine)
         run_visualization(engine)
@@ -92,13 +111,18 @@ def main():
         print(f"\nPIPELINE FAILED: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n{'=' * 78}\nPipeline completed successfully in {time.time() - pipeline_start:.2f}s")
+    print(
+        f"\n{'=' * 78}\nPipeline completed successfully in {time.time() - pipeline_start:.2f}s"
+    )
     print("=" * 78)
     print("Outputs:")
     print("  docs/data_dictionary.md")
     print("  docs/lineage_report.md")
     print("  docs/lineage_graph.png")
     print("  docs/lineage_graph_interactive.html")
+    print("  reports/calculation_validation.xlsx")
+    print("  reports/governance_dashboard.csv")
+    print("  docs/governance_dashboard.png")
 
 
 if __name__ == "__main__":

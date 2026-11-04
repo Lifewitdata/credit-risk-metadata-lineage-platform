@@ -1,2 +1,6 @@
 -r requirements.txt
 pytest>=8,<10
+# Formatter for the pipeline entry point and the metadata modules listed below.
+# Tests, ETL, lineage and SQL fixtures keep their own compact layout and are not
+# black-formatted, so scope the command rather than running black on the repo.
+black>=25,<27
