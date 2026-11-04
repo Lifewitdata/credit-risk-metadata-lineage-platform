@@ -140,3 +140,17 @@ one outcome that would make the freshness signal lie.
 - **Correction.** Never edit `close_value` by hand to make a check pass. Re-fetch, or
   open a governance issue against the field and leave the discrepancy visible — which
   is what this catalog is for.
+
+
+## Rejected downloads
+
+The market loader validates the entire response before its table replacement.
+Duplicate trading dates (even with matching values), non-finite or non-positive
+index levels, unexpected columns, and downloads with no priced observations raise
+an error before any table write. Explicit missing markers remain NULL when the
+response also contains priced observations. Valid rows are sorted by trading date
+so the provenance range is independent of source ordering.
+
+On rejection, inspect the source response and retain the previous dataset; do not
+remove the checks to force a refresh. This protects against invalid input, but does
+not make the later table replacement and catalog registration atomic.

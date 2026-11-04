@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m pytest -q tests/test_catalog.py
+      - run: python -m pytest -q tests/test_catalog.py tests/test_market_input.py
       # Synthetic volume check: SQLite only, so it costs seconds and proves the
       # null pass stays one query per dataset as the table gets wider.
       - run: python -m pytest -q tests/test_scale.py
